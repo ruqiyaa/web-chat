@@ -9,5 +9,39 @@
     <ul id="messages"></ul>
     <input id="box" placeholder="Type a message">
     <button id="send">send</button>
+
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script>
+        const socket = io();
+        const messages = document.getElementById("messages");
+        const box = document.getElementById("box");
+        const send = document.getElementById("send");
+
+        const name = prompt("Your name?") || "Guest";
+
+        socket.on("connect", () => {
+            socket.emit("join", name);
+        });
+
+        function addLine(text) {
+            const li = document.createElement("li");
+            li.textContent = text;
+            messages.appendChild(li);
+        }
+
+        socket.on("message", function(msg) {
+            addLine(msg.name + ": " + msg.text);
+        });
+
+        socket.on("notice", (text)=>{
+            addLine("*** " + text + " ***");
+        });
+
+        send.addEventListener("click", () => {
+            if(box.value.trim() === "") return;
+            socket.emit("message", box.value);
+            box.value = "";
+        });
+    </script>
 </body>
 </html>
