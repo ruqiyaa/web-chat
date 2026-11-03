@@ -65,10 +65,10 @@ input:focus-visible {
 /* chat screen */
 .app {
   height: 100dvh;
-  max-width: 800px;
+  max-width: 1000px;
   margin: 0 auto;
   display: flex;
-  flex-direction: column;
+  background: var(--bg);
 }
 .top {
   display: flex;
@@ -171,3 +171,110 @@ input:focus-visible {
   justify-content: center;
   cursor: pointer;
 }
+
+.error { color: #B91C1C; margin: 0; font-size: 14px; }
+
+.side {
+  width: 280px;
+  flex: none;
+  background: #fff;
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.me {
+  padding: 12px 16px;
+  font-size: 13px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+.contact {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 16px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.contact:hover { background: var(--bg); }
+.contact.active { background: var(--sent); }
+.contact .avatar {
+  background: var(--accent);
+  color: var(--accent-text);
+  flex: none;
+}
+.contact-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.contact-state { font-size: 12px; color: var(--muted); }
+.badge {
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 11px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.chat {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.composer input:disabled { background: var(--bg); }
+.send:disabled { opacity: 0.5; cursor: not-allowed; }
+
+@media (max-width: 640px) {
+  .app { flex-direction: column; }
+  .side {
+    width: auto;
+    flex-direction: row;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  .me { display: none; }
+  .contact { width: auto; max-width: 220px; flex: none; }
+}
+
+.contact-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.contact-top { display: flex; align-items: baseline; gap: 6px; }
+.contact-preview {
+  font-size: 13px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.contact-meta {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+.contact-time { font-size: 11px; color: var(--muted); }
