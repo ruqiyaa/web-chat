@@ -1,5 +1,6 @@
 from flask import Flask, render_template, request
 from flask_socketio import SocketIO, emit
+from db import init_db
 
 app = Flask(__name__)
 socketio = SocketIO(app)
@@ -62,6 +63,6 @@ def handle_private(data):
     socketio.emit("private", payload, to=target_sid)
     emit("private", payload)
 
-
+init_db()
 if __name__ == "__main__":
     socketio.run(app, port=5001, debug=True)
