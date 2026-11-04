@@ -1,3 +1,5 @@
+import logo from "../assets/raabta-logo.png";
+
 export default function JoinScreen({ name, setName, error, onJoin }) {
   function submit(e) {
     e.preventDefault();
@@ -7,7 +9,11 @@ export default function JoinScreen({ name, setName, error, onJoin }) {
   return (
     <div className="join">
       <form className="join-card" onSubmit={submit}>
-        <h1>Join the chat</h1>
+        <div className="brand">
+          <img src={logo} alt="" className="brand-logo" />
+          <h1 className="wordmark">Raabta</h1>
+          <p className="tagline">Your people. Your tea.</p>
+        </div>
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}

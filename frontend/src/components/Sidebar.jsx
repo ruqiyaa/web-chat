@@ -1,3 +1,5 @@
+import logo from "../assets/raabta-logo.png";
+
 function lastMessage(lines = []) {
   for (let i = lines.length - 1; i >= 0; i--) {
     if (lines[i].kind === "message") return lines[i];
@@ -70,6 +72,10 @@ export default function Sidebar({
 
   return (
     <nav className="side" aria-label="Chats">
+      <div className="side-brand">
+        <img src={logo} alt="" className="side-logo" />
+        <span className="side-wordmark"> RAABTA </span>
+      </div>
       <div className="me">Signed in as {name}</div>
       {rows.map((row) => (
         <Contact

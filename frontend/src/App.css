@@ -1,12 +1,25 @@
 :root {
-  --accent: #4F46E5;
+  /* colours taken from the Raabta logo */
+  --peach: #FDAA6B;
+  --coral: #F47C8A;
+  --rose: #E4879D;
+  --violet: #A374F4;
+  --brand-gradient: linear-gradient(135deg, var(--peach), var(--rose) 45%, var(--violet));
+
+  /* deeper version, safe for white text */
+  --brand-gradient-strong: linear-gradient(135deg, #BE3A5C, #5B2EC4);
+
+  /* roles */
+  --accent: #5B2EC4;
   --accent-text: #FFFFFF;
-  --sent: #E0E7FF;
+  --sent: #F1E8FF;
   --received: #FFFFFF;
-  --bg: #F3F4F8;
-  --text: #1F2937;
-  --muted: #4B5563;
-  --line: #D8DCE6;
+  --bg: #FBF7FF;
+  --text: #24173F;
+  --muted: #5E5675;
+  --line: #E6DCF5;
+  --attention: #FDAA6B;
+  --on-attention: #3A1230;
 }
 
 * { box-sizing: border-box; }
@@ -65,8 +78,6 @@ input:focus-visible {
 /* chat screen */
 .app {
   height: 100dvh;
-  max-width: 1000px;
-  margin: 0 auto;
   display: flex;
   background: var(--bg);
 }
@@ -253,6 +264,7 @@ input:focus-visible {
   }
   .me { display: none; }
   .contact { width: auto; max-width: 220px; flex: none; }
+    .side-brand { display: none; }
 }
 
 .contact-body {
@@ -278,3 +290,35 @@ input:focus-visible {
   gap: 4px;
 }
 .contact-time { font-size: 11px; color: var(--muted); }
+
+
+/* ---- Raabta brand ---- */
+.top { background: var(--brand-gradient-strong); }
+.primary,
+.send { background: var(--brand-gradient-strong); }
+.contact .avatar { background: var(--brand-gradient-strong); }
+.top .avatar { background: rgba(0, 0, 0, 0.2); }
+.badge { background: var(--attention); color: var(--on-attention); }
+
+.brand { text-align: center; }
+.brand-logo {
+  display: block;
+  width: 200px;
+  max-width: 70%;
+  height: auto;
+  margin: 0 auto 8px;
+}
+.brand .wordmark {
+  margin: 0;
+  font-size: 32px;
+  background: var(--brand-gradient-strong);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.tagline { margin: 4px 0 0; color: var(--muted); }
+
+
+.side-brand { display: flex; align-items: center; gap: 8px; padding: 12px 16px; }
+.side-logo { height: 28px; width: auto; }
+.side-wordmark { font-weight: 700; font-size: 18px; color: var(--accent); }
