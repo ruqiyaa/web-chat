@@ -1,6 +1,12 @@
-from flask import Flask, render_template, request
+import re
+import sqlite3
+import time
+
+from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO, emit
-from db import init_db
+from db import init_db, get_db
+from werkzeug.security import generate_password_hash
+
 
 app = Flask(__name__)
 socketio = SocketIO(app)
@@ -10,6 +16,68 @@ users = {}
 @app.route("/")
 def home():
     return render_template("index.html")
+
+@app.route("/api/register", methods=["POST"])
+def register():
+    data = request.get_json(silent=True)
+
+    if not isinstance(data, dict):
+        return jsonify({"error": "Invalid request data"}), 400
+
+    username = data.get("username")
+    display_name = data.get("display_name")
+    password = data.get("password")
+
+    if not all(isinstance(value, str) for value in [username, display_name, password]):
+        return jsonify({"error" : "All fields are required"}), 400
+
+    username = username.strip().lower()
+    display_name = display_name.strip()
+
+    if not re.fullmatch(r"[a-zA-Z0-9_]{3,20}", username):
+        return jsonify({"error": "Username must be 3-20 characters and contain only letters, numbers and underscores"}), 400
+
+    if not display_name or len(display_name) > 30:
+        return jsonify({"error": "Display name must be between 1 and 30 characters"}), 400
+
+    if len(password) < 8 or len(password) > 128:
+        return jsonify({"error": "Password must contain atleast 8 and not more than 128 characters"}), 400
+
+    with get_db() as db:
+        existing_user = db.execute(
+            "SELECT id FROM users WHERE username = ?", 
+            (username,)
+        ).fetchone()
+
+        if existing_user:
+            return jsonify({"error": "Username already exists"}), 409
+
+        password_hash = generate_password_hash(password)
+
+        try:
+            cursor = db.execute(
+                """
+                INSERT INTO users (username, display_name, password_hash, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (username, display_name, password_hash, int(time.time())),
+            )
+
+            user_id = cursor.lastrowid
+
+        except sqlite3.IntegrityError as e:
+            if "UNIQUE" in str(e):
+                return jsonify({"error": "Username already exists"}), 409
+            raise
+
+    return jsonify({
+        "message": "Account created successfully",
+        "user": {
+            "id": user_id,
+            "username": username,
+            "display_name": display_name
+        }
+    }), 201
 
 @socketio.on("join")
 def handle_join(name):
