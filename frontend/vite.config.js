@@ -11,6 +11,8 @@ export default defineConfig({
         ws: true,
       },
       '/api': { target: 'http://127.0.0.1:5001'},
+
+      '/avatars': { target: 'http://127.0.0.1:5001'},
     },
   },
 })

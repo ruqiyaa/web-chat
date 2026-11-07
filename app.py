@@ -6,10 +6,11 @@ import time
 
 from datetime import timedelta
 from pathlib import Path
-from flask import Flask, render_template, request, jsonify, session
+from flask import (Flask, render_template, request, jsonify, session, send_from_directory, abort)
 from flask_socketio import SocketIO, emit, join_room
 from db import init_db, get_db
 from werkzeug.security import generate_password_hash, check_password_hash
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 
 app = Flask(__name__)
@@ -30,7 +31,53 @@ app.config.update(
     SESSION_COOKIE_SECURE=os.environ.get("RAABTA_HTTPS") == "1",
     PERMANENT_SESSION_LIFETIME=timedelta(days=30),
 )
+
+app.config["MAX_CONTENT_LENGTH"] = 3 * 1024 * 1024 #rejecting uploads over 3mb
+AVATAR_DIR = Path(__file__).with_name("uploads") / "avatars"
+AVATAR_DIR.mkdir(parents=True, exist_ok=True)
+MAX_PIXELS = 20_000_000   #guards against img bombs
+
+@app.errorhandler(413)
+def too_large(e):
+    return jsonify({"error": "File too large (max 3MB)"}), 413
+
+
 socketio = SocketIO(app)
+
+
+#----- rate limiting password (kept in memory) ----- #
+from collections import deque
+import threading
+
+_hits = {}
+_hits_lock = threading.Lock()
+
+def _prune(key, window, now):
+    q = _hits.get(key)
+    if q is None:
+        return 0
+    while q and now - q[0] > window:  #forget events older than window
+        q.popleft()
+    if not q:
+        del _hits[key]
+        return 0
+    return len(q)
+
+
+def blocked(key, limit, window=600):
+    with _hits_lock:
+        return _prune(key, window, time.time()) >= limit
+
+def hit(key):
+    with _hits_lock:
+        if len(_hits) > 10000:
+            _hits.clear()
+        _hits.setdefault(key, deque()).append(time.time())
+
+def reset(key):
+    with _hits_lock:
+        _hits.pop(key, None)
+
 
 #-----HOME-----#
 @app.route("/")
@@ -40,6 +87,10 @@ def home():
 #-----REGISTER-----#
 @app.route("/api/register", methods=["POST"])
 def register():
+    ip = request.remote_addr or "unknown"
+    if blocked(("register", ip), 10, 3600):
+        return jsonify({"error": "Too many sign-ups from this network. Try again later"}), 429
+    
     data = request.get_json(silent=True)
 
     if not isinstance(data, dict):
@@ -93,6 +144,7 @@ def register():
 
     session.clear()
     session["user_id"] = user_id
+    hit(("register", ip))
 
     return jsonify({
         "message": "Account created successfully",
@@ -106,14 +158,30 @@ def register():
 DUMMY_HASH = generate_password_hash("not-a-real-password")
 
 #-----HELPER-----#
-def public_user(row):
-    return{
-        "id": row["id"],
+def profile_card(row):
+    #what other people see about someone..no id no hash
+    return {
         "username": row["username"],
         "display_name": row["display_name"],
         "bio": row["bio"],
-        "avatar": row["avatar"],
+        "avatar_url": f"/avatars/{row['avatar']}" if row["avatar"] else None,
     }
+
+def public_user(row):
+    return{
+        "id": row["id"], **profile_card(row)
+    }
+
+def online_profiles():
+    names = sorted(set(online.values()))
+    if not names:
+        return []
+    marks = ",".join("?" * len(names))
+    with get_db() as db:
+        rows = db.execute(
+            f"SELECT * FROM users WHERE username IN ({marks})", names
+        ).fetchall()
+    return [profile_card(r) for r in rows]
 
 #-----HELPER-----#
 def current_user():
@@ -137,7 +205,13 @@ def login():
     if not isinstance(username, str) or not isinstance(password, str):
         return jsonify({"error": "Username and password are required"}), 400
 
-    username = username.strip().lower()
+    username = username.strip().lower()[:30]
+    ip = request.remote_addr or "unknown"
+    pair = ("login", ip, username)
+
+    #check limits
+    if blocked(pair, 5) or blocked(("login-ip", ip), 20):
+        return jsonify({"error": "Too many attempts. Try again after few minutes."}), 429
 
     with get_db() as db:
         row = db.execute(
@@ -148,8 +222,11 @@ def login():
     password_ok = check_password_hash(stored_hash, password[:128])
 
     if not row or not password_ok:
+        hit(pair)
+        hit(("login-ip", ip))
         return jsonify({"error": "Username or password is incorrect"}), 401
 
+    reset(pair)
     session.clear()
     session["user_id"] = row["id"]
     session.permanent = remember
@@ -171,6 +248,101 @@ def me():
         return jsonify({"error": "Not logged in"}), 401
     return jsonify({"user": public_user(user)})
 
+#----- PROFILE ------ #
+
+@app.route("/api/profile", methods=["PATCH"])
+def update_profile():
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Not logged in"}), 401
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "Invalid request data"}), 400
+    display_name = data.get("display_name")
+    bio = data.get("bio", "")
+    if not isinstance(display_name, str) or not isinstance(bio, str):
+        return jsonify({"error": "Invalid request data"}), 400
+
+    display_name = " ".join(display_name.split())
+    bio = " ".join(bio.split())
+    if not display_name or len(display_name) > 30:
+        return jsonify({"error": "Enter valid name(1-30 characters)"}), 400
+    if len(bio) > 160:
+        return jsonify({"error": "Bio not more than 160 characters"}), 400
+
+    with get_db() as db:
+        db. execute("UPDATE users SET display_name = ?, bio = ?, WHERE id = ?",
+                    (display_name, bio, user["id"]))
+        socketio.emit("users", online_profiles())
+        return jsonify({"user": public_user(current_user())})
+
+
+#----- AVATAR -----#
+def delete_avatar_file(filename):
+    if filename:
+        (AVATAR_DIR / Path(filename).name).unlink(missing_ok=True)
+
+@app.route("/api/avatar", methods=["POST"])
+def upload_avatar():
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Please log in"}), 401
+    if blocked(("avatar", user["id"]), 10, 3600):
+        return jsonify({"error": "Too many uploads. Try again later"}), 429
+    file = request.files.get("avatar")
+    if file is None:
+        return jsonify({"error": "No file received"}), 400
+
+    try:
+        img = Image.open(file.stream)           #reads only header
+        if img.format not in ("JPEG", "PNG", "WEBP"):
+            return jsonify({"error": "Use only JPEG, PNG or WEBP format"}), 400
+        if img.width * img.height > MAX_PIXELS:
+            return jsonify({"error": "Image too large"}), 400
+        img = ImageOps.exif_transpose(img)      #phone rotation
+        img = img.convert("RGBA")
+        flat = Image.new("RGB", img.size, "white")  #transparent ares become white
+        flat.paste(img, mask=img.getchannel("A"))
+        img = ImageOps.fit(flat, (256, 256))        #square crop 256*256
+
+    except (UnidentifiedImageError, Image.DecompressionBombError, OSError, ValueError):
+        return jsonify({"error": "Invalid image"}), 400
+
+    filename = secrets.token_hex(16) + ".jpg"       #random name
+    img.save(AVATAR_DIR / filename, "JPEG", quality=85)     #re-encoded: brand new file
+    hit(("avatar", user["id"]))
+
+    with get_db() as db:
+        db.execute("UPDATE users SET avatar = ? WHERE id = ?", (filename, user["id"]))
+
+    delete_avatar_file(user["avatar"])
+    socketio.emit("users", online_profiles())
+    return jsonify({"user": public_user(current_user())})
+
+@app.route("/api/avatar", methods=["DELETE"])
+def remove_avatar():
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Not logged in"}), 401
+    with get_db() as db:
+        db.execute("UPDATE users SET avatar = NULL WHERE id = ?", (user["id"],))
+    delete_avatar_file(user["avatar"])
+    socketio.emit("users", online_profiles())
+    return jsonify({"user": public_user(current_user())})
+
+
+@app.route("/avatars/<filename>")
+def avatar_file(filename):
+    if current_user() is None:                            # only logged-in users see pictures
+        abort(401)
+    if not re.fullmatch(r"[0-9a-f]{32}\.jpg", filename):  # only names we generated
+        abort(404)
+    resp = send_from_directory(AVATAR_DIR, filename)
+    resp.headers["Cache-Control"] = "private, max-age=86400"
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    return resp
+
+        
 
 #-----SOCKETS-----#
 online = {}
@@ -187,7 +359,7 @@ def handle_connect(auth=None):
     join_room(name)
     if first_tab:
         socketio.emit("notice", f"{name} joined")
-    socketio.emit("users", sorted(set(online.values())))
+    socketio.emit("users", online_profiles())
 
 #-----DISCONNECT-----#
 @socketio.on("disconnect")
@@ -195,7 +367,7 @@ def handle_disconnect(reason=None):
     name = online.pop(request.sid, None)
     if name and name not in online.values():
         socketio.emit("notice", f"{name} left")
-        socketio.emit("users", sorted(set(online.values())))
+        socketio.emit("users", online_profiles())
 
 
 #-----GROUP MESSAGE-----#
@@ -208,7 +380,7 @@ def handle_message(text):
     if not text:
         return
     socketio.emit("message", {"name": name, "text": text})
-    
+
 
 @socketio.on("private")
 def handle_private(data):
