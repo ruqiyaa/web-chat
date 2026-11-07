@@ -1,3 +1,11 @@
+/* =====================================================
+   Raabta styles
+   To scale the whole app, change the font-size on the
+   "html" rule below (1rem = that size everywhere).
+   ===================================================== */
+
+html { font-size: 17px; }
+
 :root {
   /* colours taken from the Raabta logo */
   --peach: #FDAA6B;
@@ -29,6 +37,7 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: system-ui, -apple-system, sans-serif;
+  font-size: 1rem;
 }
 
 button:focus-visible,
@@ -37,156 +46,136 @@ input:focus-visible {
   outline-offset: 2px;
 }
 
-/* join screen */
+/* ---------- login and sign-up ---------- */
 .join {
   min-height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 16px;
+  padding: 1rem;
+  background: linear-gradient(160deg, #FFE9D6 0%, var(--bg) 45%, #E9DDFF 100%);
 }
 .join-card {
   background: #fff;
-  padding: 32px;
-  border-radius: 16px;
   width: 100%;
-  max-width: 360px;
+  max-width: 28rem;
+  padding: 2.6rem 2.4rem;
+  border-radius: 1.5rem;
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  gap: 1.1rem;
+  box-shadow: 0 8px 32px rgba(60, 30, 120, 0.12);
 }
-.join-card h1 { margin: 0; font-size: 22px; }
+.join-card h1 { margin: 0; }
 .join-card input {
-  height: 44px;
+  height: 3.2rem;
   border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 0 14px;
-  font-size: 16px;
+  border-radius: 0.75rem;
+  padding: 0 1rem;
+  font-size: 1.05rem;
+}
+.join-card .check input {
+  width: 1.2rem;
+  height: 1.2rem;
+  padding: 0;
+  accent-color: var(--accent);
+}
+
+.brand { text-align: center; }
+.brand-logo {
+  display: block;
+  width: 15rem;
+  max-width: 70%;
+  height: auto;
+  margin: 0 auto 0.5rem;
+}
+.brand .wordmark {
+  margin: 0;
+  font-size: 2.6rem;
+  background: var(--brand-gradient-strong);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.tagline { margin: 0.25rem 0 0; font-size: 1.05rem; color: var(--muted); }
+.auth-title { margin: 0; font-size: 1.45rem; text-align: center; }
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+.check {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 1rem;
+  color: var(--muted);
 }
 .primary {
-  height: 44px;
+  height: 3.3rem;
   border: 0;
-  border-radius: 10px;
-  background: var(--accent);
+  border-radius: 0.85rem;
+  background: var(--brand-gradient-strong);
   color: var(--accent-text);
-  font-size: 16px;
+  font-size: 1.06rem;
   font-weight: 600;
   cursor: pointer;
 }
+.primary:disabled { opacity: 0.6; cursor: not-allowed; }
+.switch { margin: 0; text-align: center; font-size: 1rem; color: var(--muted); }
+.link {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+}
+.error { color: #B91C1C; margin: 0; font-size: 0.92rem; }
+.center-note { text-align: center; margin-top: 40vh; color: var(--muted); }
 
-/* chat screen */
+/* ---------- chat layout ---------- */
 .app {
   height: 100dvh;
+  width: 100%;
   display: flex;
   background: var(--bg);
 }
-.top {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
-  background: var(--accent);
-  color: var(--accent-text);
-}
-.avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.25);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 600;
-}
-.title { font-weight: 600; }
-.sub { font-size: 13px; }
-
-.messages {
-  flex: 1;
-  overflow-y: auto;
-  list-style: none;
-  margin: 0;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.bubble {
-  max-width: 70%;
-  padding: 8px 12px 6px;
-  border-radius: 14px;
-  line-height: 1.4;
-  overflow-wrap: anywhere;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.08);
-}
-.mine {
-  align-self: flex-end;
-  background: var(--sent);
-  border-bottom-right-radius: 4px;
-}
-.theirs {
-  align-self: flex-start;
-  background: var(--received);
-  border-bottom-left-radius: 4px;
-}
-.who {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--accent);
-  margin-bottom: 2px;
-}
-.time {
-  align-self: flex-end;
-  font-size: 11px;
-  color: var(--muted);
-  margin-top: 2px;
-}
-.notice {
-  align-self: center;
-  font-size: 12px;
-  color: var(--muted);
-  background: rgba(0, 0, 0, 0.06);
-  padding: 3px 10px;
-  border-radius: 10px;
-}
-.anchor { height: 0; padding: 0; }
-
-.composer {
-  display: flex;
-  gap: 8px;
-  padding: 10px 12px;
-  background: #fff;
-  border-top: 1px solid var(--line);
-}
-.composer input {
+.chat {
   flex: 1;
   min-width: 0;
-  height: 44px;
-  border: 1px solid var(--line);
-  border-radius: 22px;
-  padding: 0 16px;
-  font-size: 16px;
-}
-.send {
-  width: 44px;
-  height: 44px;
-  border: 0;
-  border-radius: 50%;
-  background: var(--accent);
-  color: var(--accent-text);
+  min-height: 0;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-direction: column;
+}
+
+/* log out button (sits over the right end of the chat header) */
+.logout {
+  position: fixed;
+  top: 1.25rem;
+  right: 1.5rem;
+  z-index: 10;
+  height: 2.7rem;
+  padding: 0 1.2rem;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 1.35rem;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
   cursor: pointer;
 }
+.logout:hover { background: rgba(255, 255, 255, 0.28); }
 
-.error { color: #B91C1C; margin: 0; font-size: 14px; }
-
+/* ---------- sidebar ---------- */
 .side {
-  width: 280px;
+  width: clamp(20rem, 30vw, 27rem);
   flex: none;
   background: #fff;
   border-right: 1px solid var(--line);
@@ -194,18 +183,27 @@ input:focus-visible {
   display: flex;
   flex-direction: column;
 }
+.side-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+}
+.side-logo { height: 2.6rem; width: auto; }
+.side-wordmark { font-weight: 700; font-size: 1.5rem; color: var(--accent); }
 .me {
-  padding: 12px 16px;
-  font-size: 13px;
+  padding: 0.75rem 1.25rem;
+  font-size: 0.9rem;
   color: var(--muted);
   border-bottom: 1px solid var(--line);
 }
+
 .contact {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 1rem;
   width: 100%;
-  padding: 12px 16px;
+  padding: 0.95rem 1.25rem;
   border: 0;
   background: transparent;
   color: var(--text);
@@ -215,68 +213,40 @@ input:focus-visible {
 }
 .contact:hover { background: var(--bg); }
 .contact.active { background: var(--sent); }
-.contact .avatar {
-  background: var(--accent);
-  color: var(--accent-text);
+
+.avatar {
+  width: 3.2rem;
+  height: 3.2rem;
   flex: none;
-}
-.contact-name {
-  flex: 1;
-  min-width: 0;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.contact-state { font-size: 12px; color: var(--muted); }
-.badge {
-  min-width: 22px;
-  height: 22px;
-  padding: 0 6px;
-  border-radius: 11px;
-  background: var(--accent);
+  border-radius: 50%;
+  background: var(--brand-gradient-strong);
   color: var(--accent-text);
-  font-size: 12px;
-  font-weight: 600;
   display: flex;
   align-items: center;
   justify-content: center;
+  font-size: 1.2rem;
+  font-weight: 600;
 }
-.chat {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-.composer input:disabled { background: var(--bg); }
-.send:disabled { opacity: 0.5; cursor: not-allowed; }
-
-@media (max-width: 640px) {
-  .app { flex-direction: column; }
-  .side {
-    width: auto;
-    flex-direction: row;
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
-    overflow-x: auto;
-    overflow-y: hidden;
-  }
-  .me { display: none; }
-  .contact { width: auto; max-width: 220px; flex: none; }
-    .side-brand { display: none; }
-}
-
 .contact-body {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 0.15rem;
 }
-.contact-top { display: flex; align-items: baseline; gap: 6px; }
+.contact-top { display: flex; align-items: baseline; gap: 0.4rem; }
+.contact-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.contact-state { font-size: 0.78rem; color: var(--muted); }
 .contact-preview {
-  font-size: 13px;
+  font-size: 0.9rem;
   color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -287,38 +257,152 @@ input:focus-visible {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 4px;
+  gap: 0.3rem;
 }
-.contact-time { font-size: 11px; color: var(--muted); }
-
-
-/* ---- Raabta brand ---- */
-.top { background: var(--brand-gradient-strong); }
-.primary,
-.send { background: var(--brand-gradient-strong); }
-.contact .avatar { background: var(--brand-gradient-strong); }
-.top .avatar { background: rgba(0, 0, 0, 0.2); }
-.badge { background: var(--attention); color: var(--on-attention); }
-
-.brand { text-align: center; }
-.brand-logo {
-  display: block;
-  width: 200px;
-  max-width: 70%;
-  height: auto;
-  margin: 0 auto 8px;
+.contact-time { font-size: 0.78rem; color: var(--muted); }
+.contact-count { font-size: 0.78rem; color: var(--muted); }
+.badge {
+  min-width: 1.6rem;
+  height: 1.6rem;
+  padding: 0 0.4rem;
+  border-radius: 0.8rem;
+  background: var(--attention);
+  color: var(--on-attention);
+  font-size: 0.85rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-.brand .wordmark {
-  margin: 0;
-  font-size: 32px;
+
+/* ---------- conversation header ---------- */
+.top {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.6rem;
   background: var(--brand-gradient-strong);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
+  color: var(--accent-text);
 }
-.tagline { margin: 4px 0 0; color: var(--muted); }
+.top .avatar { background: rgba(0, 0, 0, 0.2); }
+.title { font-size: 1.2rem; font-weight: 600; }
+.sub { font-size: 0.92rem; }
 
+/* ---------- messages ---------- */
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: 1.6rem 2.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+.bubble {
+  max-width: min(70%, 40rem);
+  padding: 0.7rem 1.1rem 0.55rem;
+  border-radius: 1.2rem;
+  font-size: 1.06rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.08);
+}
+.mine {
+  align-self: flex-end;
+  background: var(--sent);
+  border-bottom-right-radius: 0.4rem;
+}
+.theirs {
+  align-self: flex-start;
+  background: var(--received);
+  border-bottom-left-radius: 0.4rem;
+}
+.who {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 0.1rem;
+}
+.time {
+  align-self: flex-end;
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-top: 0.15rem;
+}
+.notice {
+  align-self: center;
+  font-size: 0.85rem;
+  color: var(--muted);
+  background: rgba(0, 0, 0, 0.06);
+  padding: 0.3rem 0.9rem;
+  border-radius: 0.7rem;
+}
+.conn-banner {
+  background: var(--attention);
+  color: var(--on-attention);
+  text-align: center;
+  padding: 0.5rem;
+  font-size: 0.92rem;
+}
 
-.side-brand { display: flex; align-items: center; gap: 8px; padding: 12px 16px; }
-.side-logo { height: 28px; width: auto; }
-.side-wordmark { font-weight: 700; font-size: 18px; color: var(--accent); }
+/* ---------- message box ---------- */
+.composer {
+  display: flex;
+  gap: 0.85rem;
+  padding: 1rem 1.4rem;
+  background: #fff;
+  border-top: 1px solid var(--line);
+}
+.composer input {
+  flex: 1;
+  min-width: 0;
+  height: 3.3rem;
+  border: 1px solid var(--line);
+  border-radius: 1.65rem;
+  padding: 0 1.4rem;
+  font-size: 1.06rem;
+}
+.composer input:disabled { background: var(--bg); }
+.send {
+  width: 3.3rem;
+  height: 3.3rem;
+  flex: none;
+  border: 0;
+  border-radius: 50%;
+  background: var(--brand-gradient-strong);
+  color: var(--accent-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.send svg { width: 1.5rem; height: 1.5rem; }
+.send:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ---------- phones ---------- */
+@media (max-width: 640px) {
+  html { font-size: 16px; }
+  .app { flex-direction: column; }
+  .side {
+    width: auto;
+    flex-direction: row;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-right: 6.5rem;
+  }
+  .side-brand, .me { display: none; }
+  .contact { width: auto; max-width: 14rem; flex: none; padding: 0.7rem 1rem; }
+  .avatar { width: 2.7rem; height: 2.7rem; font-size: 1rem; }
+  .top { padding: 0.75rem 1rem; }
+  .messages { padding: 1rem; }
+  .bubble { max-width: 85%; }
+  .composer { padding: 0.75rem 1rem; }
+  .join-card { padding: 2rem 1.5rem; }
+  .brand-logo { width: 12rem; }
+  .logout { top: 0.5rem; right: 0.5rem; height: 2.2rem; padding: 0 0.8rem; font-size: 0.85rem; }
+}

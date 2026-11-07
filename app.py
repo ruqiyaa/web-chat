@@ -1,22 +1,43 @@
 import re
+import os
+import secrets
 import sqlite3
 import time
 
-from flask import Flask, render_template, request, jsonify
-from flask_socketio import SocketIO, emit
+from datetime import timedelta
+from pathlib import Path
+from flask import Flask, render_template, request, jsonify, session
+from flask_socketio import SocketIO, emit, join_room
 from db import init_db, get_db
-from werkzeug.security import generate_password_hash
+from werkzeug.security import generate_password_hash, check_password_hash
 
 
 app = Flask(__name__)
+
+def load_secret_key():
+    key = os.environ.get("RAABTA_SECRET_KEY")
+    if key:
+        return key
+    path = Path(__file__).with_name(".dev_secret")
+    if not path.exists():
+        path.write_text(secrets.token_hex(32))
+    return path.read_text().strip()
+
+app.secret_key = load_secret_key()
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=os.environ.get("RAABTA_HTTPS") == "1",
+    PERMANENT_SESSION_LIFETIME=timedelta(days=30),
+)
 socketio = SocketIO(app)
 
-users = {}
-
+#-----HOME-----#
 @app.route("/")
 def home():
     return render_template("index.html")
 
+#-----REGISTER-----#
 @app.route("/api/register", methods=["POST"])
 def register():
     data = request.get_json(silent=True)
@@ -70,6 +91,9 @@ def register():
                 return jsonify({"error": "Username already exists"}), 409
             raise
 
+    session.clear()
+    session["user_id"] = user_id
+
     return jsonify({
         "message": "Account created successfully",
         "user": {
@@ -79,57 +103,132 @@ def register():
         }
     }), 201
 
-@socketio.on("join")
-def handle_join(name):
-    name = str(name).strip()[:20] or "Guest"
-    if name.lower() in [n.lower() for n in users.values()]:
-        emit("join_error", f"The name {name} is taken. Try another.")
-        return
-    users[request.sid] = name
-    socketio.emit("notice", f"{name} joined")
-    socketio.emit("users", sorted(users.values()))
+DUMMY_HASH = generate_password_hash("not-a-real-password")
+
+#-----HELPER-----#
+def public_user(row):
+    return{
+        "id": row["id"],
+        "username": row["username"],
+        "display_name": row["display_name"],
+        "bio": row["bio"],
+        "avatar": row["avatar"],
+    }
+
+#-----HELPER-----#
+def current_user():
+    user_id = session.get("user_id")
+    if not user_id:
+        return None
+    with get_db() as db:
+        return db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
 
 
-@socketio.on("message")
-def handle_message(text):
-    name = users.get(request.sid, "Guest")
-    print("Received from", name, ":", text)
-    socketio.emit("message", {"name": name, "text": text})
+#-----LOGIN-----#
+@app.route("/api/login", methods=["POST"])
+def login():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "Invalid request data"}), 400
 
+    username = data.get("username")
+    password = data.get("password")
+    remember = data.get("remember") is True
+    if not isinstance(username, str) or not isinstance(password, str):
+        return jsonify({"error": "Username and password are required"}), 400
+
+    username = username.strip().lower()
+
+    with get_db() as db:
+        row = db.execute(
+            "SELECT * FROM users WHERE username = ?", (username,)
+        ).fetchone()
+
+    stored_hash = row["password_hash"] if row else DUMMY_HASH
+    password_ok = check_password_hash(stored_hash, password[:128])
+
+    if not row or not password_ok:
+        return jsonify({"error": "Username or password is incorrect"}), 401
+
+    session.clear()
+    session["user_id"] = row["id"]
+    session.permanent = remember
+    return jsonify({"user": public_user(row)})
+
+
+#-----LOGOUT-----#
+@app.route("/api/logout", methods=["POST"])
+def logout():
+    session.clear()
+    return jsonify({"message": "Logged out"})
+
+
+#-----HOME PAGE-----#
+@app.route("/api/me")
+def me():
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Not logged in"}), 401
+    return jsonify({"user": public_user(user)})
+
+
+#-----SOCKETS-----#
+online = {}
+
+#-----CONNECT-----#
+@socketio.on("connect")
+def handle_connect(auth=None):
+    user = current_user()
+    if user is None:
+        return False
+    name = user["username"]
+    first_tab = name not in online.values()
+    online[request.sid] = name
+    join_room(name)
+    if first_tab:
+        socketio.emit("notice", f"{name} joined")
+    socketio.emit("users", sorted(set(online.values())))
+
+#-----DISCONNECT-----#
 @socketio.on("disconnect")
 def handle_disconnect(reason=None):
-    name = users.pop(request.sid, None)
-    if name:
+    name = online.pop(request.sid, None)
+    if name and name not in online.values():
         socketio.emit("notice", f"{name} left")
-        socketio.emit("users", sorted(users.values()))
+        socketio.emit("users", sorted(set(online.values())))
 
-def find_sid(name):
-    for sid, n in users.items():
-        if n.lower() == name.lower():
-            return sid
-    return None
+
+#-----GROUP MESSAGE-----#
+@socketio.on("message")
+def handle_message(text):
+    name = online.get(request.sid)
+    if name is None or not isinstance(text, str):
+        return
+    text = text.strip()[:2000]
+    if not text:
+        return
+    socketio.emit("message", {"name": name, "text": text})
+    
 
 @socketio.on("private")
 def handle_private(data):
-    if not isinstance(data, dict):
+    sender = online.get(request.sid)
+    if sender is None or not isinstance(data, dict):
         return
-    sender = users.get(request.sid)
-    if not sender:
-        return
-    target = str(data.get("to", "")).strip()
+    target = str(data.get("to", "")).strip().lower()
     text = str(data.get("text", "")).strip()[:2000]
     if not text:
         return
-    target_sid = find_sid(target)
-    if target_sid is None:
-        emit("notice", f"{target} is not online")
+    if target == sender:
+        emit("notice", "You can't text yourself")
         return
-    if target_sid == request.sid:
-        emit("notice", "You cannot message yourself")
+    if target not in online.values():
+        emit("notice", f"{target} not available")
         return
-    payload = {"from": sender, "to": users[target_sid], "text": text}
-    socketio.emit("private", payload, to=target_sid)
-    emit("private", payload)
+    payload = {"from": sender, "to": target, "text": text}
+    socketio.emit("private", payload, to=target)
+    socketio.emit("private", payload, to=sender)
+
 
 init_db()
 if __name__ == "__main__":

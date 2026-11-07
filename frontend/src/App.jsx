@@ -1,56 +1,20 @@
 import "./App.css";
-import { useChat } from "./hooks/useChat";
-import JoinScreen from "./components/JoinScreen";
-import Sidebar from "./components/Sidebar";
-import ChatWindow from "./components/ChatWindow";
-import Composer from "./components/Composer";
-
-const EMPTY = [];
+import { useAuth } from "./hooks/useAuth";
+import AuthScreen from "./components/AuthScreen";
+import ChatApp from "./ChatApp";
 
 export default function App() {
-  const chat = useChat();
+  const auth = useAuth();
 
-  if (!chat.joined) {
-    return (
-      <JoinScreen
-        name={chat.name}
-        setName={chat.setName}
-        error={chat.error}
-        onJoin={chat.join}
-      />
-    );
-  }
-
-  const peerOffline =
-    chat.active !== "group" && !chat.online.includes(chat.active);
+  if (auth.loading) return <p className="center-note">Loading...</p>;
+  if (!auth.user) return <AuthScreen onAuth={auth.setUser} />;
 
   return (
-    <div className="app">
-      <Sidebar
-        name={chat.name}
-        active={chat.active}
-        unread={chat.unread}
-        online={chat.online}
-        chats={chat.chats}
-        onOpen={chat.openChat}
-      />
-      <main className="chat">
-        <ChatWindow
-          name={chat.name}
-          active={chat.active}
-          online={chat.online}
-          lines={chat.chats[chat.active] || EMPTY}
-          peerOffline={peerOffline}
-        />
-        <Composer
-          key={chat.active}
-          onSend={chat.send}
-          disabled={peerOffline}
-          placeholder={
-            peerOffline ? `${chat.active} is offline` : "Type a message"
-          }
-        />
-      </main>
-    </div>
+    <>
+      <button type="button" className="logout" onClick={auth.logout}>
+        Log out ({auth.user.username})
+      </button>
+      <ChatApp key={auth.user.id} user={auth.user} />
+    </>
   );
 }

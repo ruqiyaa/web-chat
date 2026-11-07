@@ -10,3 +10,5 @@ demo.js
 *.db-journal
 
 try_db.py 
+
+.dev_secret
