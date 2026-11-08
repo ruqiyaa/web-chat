@@ -14,6 +14,7 @@ export function useChat(user) {
   const [active, setActive] = useState("group");
   const [unread, setUnread] = useState({});
   const [online, setOnline] = useState([]);
+  const [profiles, setProfiles] = useState({});
   const [connected, setConnected] = useState(false);
   const socketRef = useRef(null);
   const activeRef = useRef("group");
@@ -41,7 +42,13 @@ export function useChat(user) {
       });
 
       socket.on("notice", (note) => addTo("group", { kind: "notice", text: note }));
-    socket.on("users", (list) => setOnline(list));
+    socket.on("users", (list) => {
+      setOnline(list.map((u) => u.username));
+      setProfiles((prev) => ({
+        ...prev,
+        ...Object.fromEntries(list.map((u) => [u.username, u]))
+      }));
+    });
     socket.on("private", (msg) => {
       const other = msg.from === name ? msg.to : msg.from;
       addTo(other, { kind: "message", time: timeNow(), name: msg.from, text: msg.text });
@@ -68,5 +75,5 @@ export function useChat(user) {
   }
 
 
-   return { name, chats, active, unread, online, connected, openChat, send };
+   return { name, chats, active, unread, online, connected, openChat, send, profiles };
 }

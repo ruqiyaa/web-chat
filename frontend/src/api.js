@@ -1,8 +1,9 @@
 export async function api(path, options = {}) {
+    const isForm = options.form instanceof FormData;
     const res = await fetch(path, {
         method: options.method || "GET",
         headers: options.body ? { "Content-Type": "application/json" } : {},
-        body: options.body ? JSON.stringify(options.body) : undefined,
+        body: isForm ? options.form : options.body ? JSON.stringify(options.body) : undefined,
         credentials: "same-origin",
     });
     let data = null;

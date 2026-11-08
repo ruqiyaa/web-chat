@@ -271,10 +271,10 @@ def update_profile():
         return jsonify({"error": "Bio not more than 160 characters"}), 400
 
     with get_db() as db:
-        db. execute("UPDATE users SET display_name = ?, bio = ?, WHERE id = ?",
+        db. execute("UPDATE users SET display_name = ?, bio = ? WHERE id = ?",
                     (display_name, bio, user["id"]))
-        socketio.emit("users", online_profiles())
-        return jsonify({"user": public_user(current_user())})
+    socketio.emit("users", online_profiles())
+    return jsonify({"user": public_user(current_user())})
 
 
 #----- AVATAR -----#

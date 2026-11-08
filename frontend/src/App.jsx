@@ -10,11 +10,11 @@ export default function App() {
   if (!auth.user) return <AuthScreen onAuth={auth.setUser} />;
 
   return (
-    <>
-      <button type="button" className="logout" onClick={auth.logout}>
-        Log out ({auth.user.username})
-      </button>
-      <ChatApp key={auth.user.id} user={auth.user} />
-    </>
+    <ChatApp
+      key={auth.user.id}
+      user={auth.user}
+      onUserChange={auth.setUser}
+      onLogout={auth.logout}
+    />
   );
 }

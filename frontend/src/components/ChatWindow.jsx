@@ -1,7 +1,9 @@
 import { useEffect, useRef } from "react";
+import Avatar from "./Avatar";
 
 export default function ChatWindow({
   name,
+  profiles,
   active,
   online,
   lines,
@@ -14,18 +16,17 @@ export default function ChatWindow({
     if (el) el.scrollTop = el.scrollHeight;
   }, [lines, active]);
 
-  const title = active === "group" ? "Group Chat" : active;
-  const subtitle =
-    active === "group"
-      ? `${online.length} online: ${online.join(", ")}`
-      : peerOffline
-        ? "offline"
-        : "online";
+  const shown = (u) => profiles[u]?.display_name || u;
+  const isGroup = active === "group";
+  const title = isGroup ? "Group chat" : shown(active);
+  const subtitle = isGroup
+    ? `${online.length} online`
+    : `@${active} · ${peerOffline ? "offline" : "online"}`;
 
   return (
     <>
       <header className="top">
-        <div className="avatar">{title[0].toUpperCase()}</div>
+        <Avatar profile={isGroup ? null : profiles[active]} name={title} />
         <div>
           <div className="title">{title}</div>
           <div className="sub">{subtitle}</div>
@@ -43,8 +44,8 @@ export default function ChatWindow({
               key={i}
               className={line.name === name ? "bubble mine" : "bubble theirs"}
             >
-              {line.name !== name && active === "group" && (
-                <span className="who">{line.name}</span>
+              {line.name !== name && isGroup && (
+                <span className="who">{shown(line.name)}</span>
               )}
               <span>{line.text}</span>
               <span className="time">{line.time}</span>

@@ -1,3 +1,4 @@
+import Avatar from "./Avatar";
 import logo from "../assets/raabta-logo.png";
 
 function lastMessage(lines = []) {
@@ -7,7 +8,17 @@ function lastMessage(lines = []) {
   return null;
 }
 
-function Contact({ label, isActive, unread, offline, preview, time, onOpen }) {
+function Contact({
+  label,
+  profile,
+  isActive,
+  unread,
+  offline,
+  preview,
+  time,
+  count,
+  onOpen,
+}) {
   return (
     <button
       type="button"
@@ -15,7 +26,7 @@ function Contact({ label, isActive, unread, offline, preview, time, onOpen }) {
       aria-current={isActive ? "true" : undefined}
       onClick={onOpen}
     >
-      <span className="avatar">{label[0].toUpperCase()}</span>
+      <Avatar profile={profile} name={label} />
       <span className="contact-body">
         <span className="contact-top">
           <span className="contact-name">{label}</span>
@@ -25,6 +36,11 @@ function Contact({ label, isActive, unread, offline, preview, time, onOpen }) {
       </span>
       <span className="contact-meta">
         {time && <span className="contact-time">{time}</span>}
+        {count > 0 && (
+          <span className="contact-count">
+            {count} msg{count === 1 ? "" : "s"}
+          </span>
+        )}
         {unread > 0 && (
           <span className="badge" aria-label={`${unread} unread`}>
             {unread}
@@ -37,32 +53,39 @@ function Contact({ label, isActive, unread, offline, preview, time, onOpen }) {
 
 export default function Sidebar({
   name,
+  me,
+  profiles,
   active,
   unread,
   online,
   chats,
   onOpen,
+  onProfile,
 }) {
   const others = online.filter((n) => n !== name);
   const offlineWithChats = Object.keys(chats).filter(
     (k) => k !== "group" && !online.includes(k),
   );
   const keys = ["group", ...others, ...offlineWithChats];
+  const shown = (u) => profiles[u]?.display_name || u;
 
   const rows = keys
     .map((key) => {
-      const last = lastMessage(chats[key]);
+      const lines = chats[key] || [];
+      const last = lastMessage(lines);
       const mine = last && last.name === name;
       let preview = "";
       if (last) {
         preview =
           key === "group" || mine
-            ? `${mine ? "You" : last.name}: ${last.text}`
+            ? `${mine ? "You" : shown(last.name)}: ${last.text}`
             : last.text;
       }
       return {
         key,
-        label: key === "group" ? "Group chat" : key,
+        count: lines.filter((l) => l.kind === "message").length,
+        label: key === "group" ? "Group chat" : shown(key),
+        profile: key === "group" ? null : profiles[key],
         ts: last ? last.ts : 0,
         time: last ? last.time : "",
         preview,
@@ -74,18 +97,26 @@ export default function Sidebar({
     <nav className="side" aria-label="Chats">
       <div className="side-brand">
         <img src={logo} alt="" className="side-logo" />
-        <span className="side-wordmark"> RAABTA </span>
+        <span className="side-wordmark">Raabta</span>
       </div>
-      <div className="me">Signed in as {name}</div>
+      <button type="button" className="me-row" onClick={onProfile}>
+        <Avatar profile={me} name={me.display_name} />
+        <span className="me-text">
+          <span className="me-name">{me.display_name}</span>
+          <span className="me-user">@{name} · Edit profile</span>
+        </span>
+      </button>
       {rows.map((row) => (
         <Contact
           key={row.key}
           label={row.label}
+          profile={row.profile}
           isActive={active === row.key}
           unread={unread[row.key] || 0}
           offline={row.key !== "group" && !online.includes(row.key)}
           preview={row.preview}
           time={row.time}
+          count={row.count}
           onOpen={() => onOpen(row.key)}
         />
       ))}
