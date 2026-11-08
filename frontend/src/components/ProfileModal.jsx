@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import Avatar from "./Avatar";
 
+const ALLOWED = ["image/jpeg", "image/png", "image/webp"];
+
 export default function ProfileModal({
   user,
   onUserChange,
@@ -10,6 +12,9 @@ export default function ProfileModal({
 }) {
   const [displayName, setDisplayName] = useState(user.display_name);
   const [bio, setBio] = useState(user.bio || "");
+  const [file, setFile] = useState(null); //picture chosen but not saved
+  const [preview, setPreview] = useState(null); //local address just incase second thoughts
+  const [removePic, setRemovePic] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const fileRef = useRef(null);
@@ -20,43 +25,82 @@ export default function ProfileModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  async function run(job) {
+  //preview add for chosen file
+  useEffect(() => {
+    if (!file) {
+      setPreview(null);
+      return;
+    }
+
+    const url = URL.createObjectURL(file);
+    setPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+
+  function pickFile(e) {
+    const chosen = e.target.files[0];
+    e.target.value = "";
+    if (!chosen) return;
+    if (!ALLOWED.includes(chosen.type))
+      return setError("Use JPEG, PNG, WEBP formats only");
+    if (chosen.size > 3 * 1024 * 1024) return setError("Pick image under 3MB");
+    setError("");
+    setFile(chosen);
+    setRemovePic(false);
+  }
+
+  function removePicture() {
+    setFile(null);
+    setRemovePic(true);
+  }
+
+  async function save(e) {
+    e.preventDefault();
     setError("");
     setBusy(true);
     try {
-      const res = await job();
-      if (res.ok) onUserChange(res.data.user);
-      else setError(res.data?.error || "Something went wrong");
-      return res.ok;
+      let latest = user;
+
+      if (file) {
+        const form = new FormData();
+        form.append("avatar", file);
+        const res = await api("/api/avatar", { method: "POST", form });
+        if (!res.ok)
+          return setError(res.data?.error || "Could not upload the picture");
+        latest = res.data.user;
+      } else if (removePic && user.avatar_url) {
+        const res = await api("/api/avatar", { method: "DELETE" });
+        if (!res.ok)
+          return setError(res.data?.error || "Could not remove picture");
+        latest = res.data.user;
+      }
+
+      if (displayName !== user.display_name || bio !== (user.bio || "")) {
+        const res = await api("/api/profile", {
+          method: "PATCH",
+          body: { display_name: displayName, bio },
+        });
+        if (!res.ok) {
+          onUserChange(latest);
+          return setError(res.daya?.error || "Could not save profile");
+        }
+        latest = res.data.user;
+      }
+      onUserChange(latest);
+      onClose();
     } catch {
-      setError("Could not reach the server");
-      return false;
+      setError("Could not reach server");
     } finally {
       setBusy(false);
     }
   }
 
-  async function save(e) {
-    e.preventDefault();
-    const ok = await run(() =>
-      api("/api/profile", {
-        method: "PATCH",
-        body: { display_name: displayName, bio },
-      }),
-    );
-    if (ok) onClose();
-  }
-
-  async function pickFile(e) {
-    const file = e.target.files[0];
-    e.target.value = ""; // lets you pick the same file again later
-    if (!file) return;
-    if (file.size > 3 * 1024 * 1024)
-      return setError("Pick an image under 3 MB");
-    const form = new FormData();
-    form.append("avatar", file);
-    await run(() => api("/api/avatar", { method: "POST", form }));
-  }
+  const shownProfile = removePic
+    ? null
+    : preview
+      ? { avatar_url: preview }
+      : user;
+  const hasPicture = !!preview || (!removePic && !!user.avatar_url);
 
   return (
     <div className="overlay" onClick={onClose}>
@@ -71,7 +115,10 @@ export default function ProfileModal({
         <h2>Your profile</h2>
 
         <div className="modal-avatar">
-          <Avatar profile={user} name={user.display_name} />
+          <Avatar
+            profile={shownProfile}
+            name={displayName || user.display_name}
+          />
           <div className="btn-row">
             <button
               type="button"
@@ -81,14 +128,12 @@ export default function ProfileModal({
             >
               Change picture
             </button>
-            {user.avatar_url && (
+            {hasPicture && (
               <button
                 type="button"
                 className="btn danger"
                 disabled={busy}
-                onClick={() =>
-                  run(() => api("/api/avatar", { method: "DELETE" }))
-                }
+                onClick={removePicture}
               >
                 Remove
               </button>
@@ -135,7 +180,7 @@ export default function ProfileModal({
 
         <div className="btn-row">
           <button type="submit" className="btn solid" disabled={busy}>
-            Save
+            {busy ? "Saving..." : "Save"}
           </button>
           <button type="button" className="btn" onClick={onClose}>
             Cancel

@@ -4,6 +4,7 @@ import secrets
 import sqlite3
 import time
 
+
 from datetime import timedelta
 from pathlib import Path
 from flask import (Flask, render_template, request, jsonify, session, send_from_directory, abort)
@@ -11,6 +12,7 @@ from flask_socketio import SocketIO, emit, join_room
 from db import init_db, get_db
 from werkzeug.security import generate_password_hash, check_password_hash
 from PIL import Image, ImageOps, UnidentifiedImageError
+from functools import wraps
 
 
 app = Flask(__name__)
@@ -342,6 +344,174 @@ def avatar_file(filename):
     resp.headers["X-Content-Type-Options"] = "nosniff"
     return resp
 
+
+#----- FRIENDS -----#
+def login_required(fn):
+    #runs a route only for logged in users
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        user = current_user()
+        if user is None:
+            return jsonify({"error": "Not logged in"}), 401
+        return fn(user, *args, **kwargs)
+    return wrapper
+
+def pair(x, y):
+    return (x, y) if x < y else (y, x)
+
+def get_friendship(db, me_id, other_id):
+    a, b = pair(me_id, other_id)
+    return db.execute(
+        "SELECT * FROM friendships WHERE user_a = ? AND user_b = ?", (a, b)
+    ).fetchone()
+
+def find_user(db, username):
+    if not isinstance(username, str):
+        return None
+    return db.execute(
+        "SELECT * FROM users WHERE username = ?", (username.strip().lower(),)
+    ).fetchone()
+
+def relation(db, me_id, other_id):
+    f = get_friendship(db, me_id, other_id)
+    if f is None:
+        return "none"
+    if f["status"] == "accepted":
+        return "freinds"
+    return "sent" if f["requested_by"] == me_id else "received"
+
+def body_username():
+    data = request.get_json(silent=True)
+    return data.get("username") if isinstance(data, dict) else None
+
+def notify_friends_changed(*usernames):
+    for u in set(usernames):
+        socketio.emit("friends_changed", to=u)
+
+@app.route("/api/users/search")
+@login_required
+def search_users(user):
+    if blocked(("search", user["id"]), 60, 60):
+        return jsonify({"error": "Too many searched. Slow down"}), 429
+    hit(("search", user["id"]))
+    q = request.args.get("q", "").strip().lower()
+    if not re.fullmatch(r"[a-z0-9_]{2,20}", q):
+        return jsonify({"users": []})
+    pattern = q.replace("_", "\\_") + "%"
+    with get_db() as db:
+        rows = db.execute(
+            "SELECT * FROM users WHERE username LIKE ? ESCAPE '\\' AND id != ?"
+            "ORDER BY username LIMIT 10",
+            (pattern, user["id"]),
+        ).fetchall()
+        out = [{**profile_card(r), "relation": relation(db, user["id"], r["id"])}
+               for r in rows]
+    return jsonify({"users": out})
+
+
+@app.route("/api/friends")
+@login_required
+def list_friends(user):
+    with get_db() as db:
+        rows = db.execute(
+            """
+            SELECT u.*, f.status, f.requested_by
+            FROM friendships f
+            JOIN users u ON u.id = CASE WHEN f.user_a = ? THEN f.user_b ELSE f.user_a END
+            WHERE f.user_a = ? OR f.user_b = ?
+            ORDER BY u.username
+            """,
+            (user["id"],) * 3,
+        ).fetchall()
+    out = {"friends": [], "incoming": [], "outgoing": []}
+    for r in rows:
+        card = profile_card(r)
+        if r["status"] == "accepted":
+            out["friends"].append(card)
+        elif r["requested_by"] == user["id"]:
+            out["outgoing"].append(card)
+        else:
+            out["incoming"].append(card)
+    return jsonify(out)
+
+
+@app.route("/api/friends/request", methods=["POST"])
+@login_required
+def friend_request(user):
+    if blocked(("freq", user["id"]), 20, 3600):
+        return jsonify({"error": "Too many requests. Try again later."}), 429
+    with get_db() as db:
+        target = find_user(db, body_username())
+        if target is None:
+            return jsonify({"error": "No user with that username"}), 404
+        if target["id"] == user["id"]:
+            return jsonify({"error": "You cannot add yourself"}), 400
+        f = get_friendship(db, user["id"], target["id"])
+        if f is not None:
+            if f["status"] == "accepted":
+                return jsonify({"error": "You are already friends"}), 409
+            if f["requested_by"] == user["id"]:
+                return jsonify({"error": "Request already sent"}), 409
+            # they had already asked us, so adding them back means accepting
+            db.execute("UPDATE friendships SET status = 'accepted' WHERE id = ?", (f["id"],))
+            result = "accepted"
+        else:
+            a, b = pair(user["id"], target["id"])
+            try:
+                db.execute(
+                    "INSERT INTO friendships (user_a, user_b, requested_by, status, created_at) "
+                    "VALUES (?, ?, ?, 'pending', ?)",
+                    (a, b, user["id"], int(time.time())),
+                )
+            except sqlite3.IntegrityError:
+                return jsonify({"error": "Request already sent"}), 409
+            result = "sent"
+    hit(("freq", user["id"]))
+    notify_friends_changed(user["username"], target["username"])
+    return jsonify({"result": result}), 201
+
+
+@app.route("/api/friends/accept", methods=["POST"])
+@login_required
+def friend_accept(user):
+    with get_db() as db:
+        target = find_user(db, body_username())
+        f = get_friendship(db, user["id"], target["id"]) if target else None
+        # only the person who was ASKED can accept (the other one made the request)
+        if f is None or f["status"] != "pending" or f["requested_by"] != target["id"]:
+            return jsonify({"error": "No pending request from that user"}), 404
+        db.execute("UPDATE friendships SET status = 'accepted' WHERE id = ?", (f["id"],))
+    notify_friends_changed(user["username"], target["username"])
+    return jsonify({"result": "accepted"})
+
+
+@app.route("/api/friends/reject", methods=["POST"])
+@login_required
+def friend_reject(user):
+    with get_db() as db:
+        target = find_user(db, body_username())
+        f = get_friendship(db, user["id"], target["id"]) if target else None
+        if f is None or f["status"] != "pending" or f["requested_by"] != target["id"]:
+            return jsonify({"error": "No pending request from that user"}), 404
+        db.execute("DELETE FROM friendships WHERE id = ?", (f["id"],))
+    notify_friends_changed(user["username"], target["username"])
+    return jsonify({"result": "rejected"})
+
+
+@app.route("/api/friends/<username>", methods=["DELETE"])
+@login_required
+def friend_remove(user, username):
+    # Removes a friend, or cancels a request I sent. You cannot delete someone
+    # else's request to you this way (that is "reject").
+    with get_db() as db:
+        target = find_user(db, username)
+        f = get_friendship(db, user["id"], target["id"]) if target else None
+        allowed = f is not None and (f["status"] == "accepted" or f["requested_by"] == user["id"])
+        if not allowed:
+            return jsonify({"error": "Nothing to remove"}), 404
+        db.execute("DELETE FROM friendships WHERE id = ?", (f["id"],))
+    notify_friends_changed(user["username"], target["username"])
+    return jsonify({"result": "removed"})
         
 
 #-----SOCKETS-----#

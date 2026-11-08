@@ -32,3 +32,19 @@ def init_db():
                 created_at      INTEGER NOT NULL
                 )
         """)
+
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS friendships (
+            id              INTEGER PRIMARY KEY,
+            user_a          INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            user_b          INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            requested_by    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            status          TEXT NOT NULL CHECK (status IN ('pending', 'accepted')),
+            created_at      INTEGER NOT NULL,
+            CHECK (user_a < user_b),
+            CHECK (requested_by IN (user_a, user_b)),
+            UNIQUE (user_a, user_b)
+            )
+        """)
+
+        db.execute("CREATE INDEX IF NOT EXISTS idx_friend_b ON friendships (user_b)")
