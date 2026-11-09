@@ -46,5 +46,20 @@ def init_db():
             UNIQUE (user_a, user_b)
             )
         """)
-
         db.execute("CREATE INDEX IF NOT EXISTS idx_friend_b ON friendships (user_b)")
+
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS messages (
+            id              INTEGER PRIMARY KEY,
+            sender_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            recipient_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            body            TEXT NOT NULL CHECK (length(body) BETWEEN 1 AND 2000),
+            created_at      INTEGER NOT NULL, --milliseconds, stamped by server
+            read_at         INTEGER,        --null means not read yet
+            CHECK (sender_id != recipient_id)
+            )
+        """)
+        db.execute("CREATE INDEX IF NOT EXISTS idx_msg_pair ON messages (sender_id, recipient_id, id)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_msg_unread ON messages (recipient_id, read_at)")
+
+        

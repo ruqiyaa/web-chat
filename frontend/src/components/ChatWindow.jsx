@@ -8,19 +8,21 @@ export default function ChatWindow({
   online,
   lines,
   peerOffline,
+  ready,
 }) {
   const listRef = useRef(null);
 
+  const lastLine = lines[lines.length - 1];
   useEffect(() => {
     const el = listRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [lines, active]);
+  }, [lastLine, active, ready]);
 
   const shown = (u) => profiles[u]?.display_name || u;
   const isGroup = active === "group";
-  const title = isGroup ? "Group chat" : shown(active);
+  const title = isGroup ? "Lobby" : shown(active);
   const subtitle = isGroup
-    ? `${online.length} online`
+    ? "Open to everyone (temporary)"
     : `@${active} · ${peerOffline ? "offline" : "online"}`;
 
   return (
@@ -45,7 +47,9 @@ export default function ChatWindow({
               className={line.name === name ? "bubble mine" : "bubble theirs"}
             >
               {line.name !== name && isGroup && (
-                <span className="who">{shown(line.name)}</span>
+                <span className="who">
+                  {line.display_name || shown(line.name)}
+                </span>
               )}
               <span>{line.text}</span>
               <span className="time">{line.time}</span>

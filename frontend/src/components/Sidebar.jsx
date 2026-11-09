@@ -1,5 +1,5 @@
-import Avatar from "./Avatar";
 import logo from "../assets/raabta-logo.png";
+import Avatar from "./Avatar";
 
 function lastMessage(lines = []) {
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -55,18 +55,17 @@ export default function Sidebar({
   name,
   me,
   profiles,
+  friends,
+  requestCount,
   active,
   unread,
   online,
   chats,
   onOpen,
   onProfile,
+  onFriends,
 }) {
-  const others = online.filter((n) => n !== name);
-  const offlineWithChats = Object.keys(chats).filter(
-    (k) => k !== "group" && !online.includes(k),
-  );
-  const keys = ["group", ...others, ...offlineWithChats];
+  const keys = ["group", ...friends.map((f) => f.username)];
   const shown = (u) => profiles[u]?.display_name || u;
 
   const rows = keys
@@ -78,13 +77,13 @@ export default function Sidebar({
       if (last) {
         preview =
           key === "group" || mine
-            ? `${mine ? "You" : shown(last.name)}: ${last.text}`
+            ? `${mine ? "You" : last.display_name || shown(last.name)}: ${last.text}`
             : last.text;
       }
       return {
         key,
         count: lines.filter((l) => l.kind === "message").length,
-        label: key === "group" ? "Group chat" : shown(key),
+        label: key === "group" ? "Lobby" : shown(key),
         profile: key === "group" ? null : profiles[key],
         ts: last ? last.ts : 0,
         time: last ? last.time : "",
@@ -99,6 +98,7 @@ export default function Sidebar({
         <img src={logo} alt="" className="side-logo" />
         <span className="side-wordmark">Raabta</span>
       </div>
+
       <button type="button" className="me-row" onClick={onProfile}>
         <Avatar profile={me} name={me.display_name} />
         <span className="me-text">
@@ -106,6 +106,40 @@ export default function Sidebar({
           <span className="me-user">@{name} · Edit profile</span>
         </span>
       </button>
+
+      <button type="button" className="friends-row" onClick={onFriends}>
+        <svg
+          width="22"
+          height="22"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+          <circle cx="9" cy="7" r="4" />
+          <path d="M19 8v6M22 11h-6" />
+        </svg>
+        <span>Friends</span>
+        {requestCount > 0 && (
+          <span
+            className="badge"
+            aria-label={`${requestCount} friend requests`}
+          >
+            {requestCount}
+          </span>
+        )}
+      </button>
+
+      {friends.length === 0 && (
+        <p className="empty">
+          No friends yet. Tap Friends to find people by username.
+        </p>
+      )}
+
       {rows.map((row) => (
         <Contact
           key={row.key}

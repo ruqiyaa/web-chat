@@ -174,17 +174,6 @@ def public_user(row):
         "id": row["id"], **profile_card(row)
     }
 
-def online_profiles():
-    names = sorted(set(online.values()))
-    if not names:
-        return []
-    marks = ",".join("?" * len(names))
-    with get_db() as db:
-        rows = db.execute(
-            f"SELECT * FROM users WHERE username IN ({marks})", names
-        ).fetchall()
-    return [profile_card(r) for r in rows]
-
 #-----HELPER-----#
 def current_user():
     user_id = session.get("user_id")
@@ -275,7 +264,7 @@ def update_profile():
     with get_db() as db:
         db. execute("UPDATE users SET display_name = ?, bio = ? WHERE id = ?",
                     (display_name, bio, user["id"]))
-    socketio.emit("users", online_profiles())
+    notify_profile_changed(user)
     return jsonify({"user": public_user(current_user())})
 
 
@@ -318,7 +307,7 @@ def upload_avatar():
         db.execute("UPDATE users SET avatar = ? WHERE id = ?", (filename, user["id"]))
 
     delete_avatar_file(user["avatar"])
-    socketio.emit("users", online_profiles())
+    notify_profile_changed(user)
     return jsonify({"user": public_user(current_user())})
 
 @app.route("/api/avatar", methods=["DELETE"])
@@ -329,7 +318,7 @@ def remove_avatar():
     with get_db() as db:
         db.execute("UPDATE users SET avatar = NULL WHERE id = ?", (user["id"],))
     delete_avatar_file(user["avatar"])
-    socketio.emit("users", online_profiles())
+    notify_profile_changed(user)
     return jsonify({"user": public_user(current_user())})
 
 
@@ -377,7 +366,7 @@ def relation(db, me_id, other_id):
     if f is None:
         return "none"
     if f["status"] == "accepted":
-        return "freinds"
+        return "friends"
     return "sent" if f["requested_by"] == me_id else "received"
 
 def body_username():
@@ -512,12 +501,139 @@ def friend_remove(user, username):
         db.execute("DELETE FROM friendships WHERE id = ?", (f["id"],))
     notify_friends_changed(user["username"], target["username"])
     return jsonify({"result": "removed"})
+
+
+
+#----- MESSAGES -----#
+def friend_map(db, user_id):
+    rows = db.execute(
+        """
+        SELECT u.id, u.username FROM friendships f
+        JOIN users u ON u.id = CASE WHEN f.user_a = ? THEN f.user_b ELSE f.user_a END
+        WHERE (f.user_a = ? OR f.user_b = ?) AND f.status = 'accepted'
+        """,
+        (user_id,) * 3,
+    ).fetchall()
+    return {r["id"]: r["username"] for r in rows}
+
+def msg_json(row, names):
+    return {
+        "id": row["id"],
+        "from": names[row["sender_id"]],
+        "to": names[row["recipient_id"]],
+        "text": row["body"],
+        "ts": row["created_at"],
+    }
+
+
+def too_fast(name):
+    # at most 30 messages per 10 seconds per person
+    if blocked(("msg", name), 30, 10):
+        return True
+    hit(("msg", name))
+    return False
+
+
+@app.route("/api/conversations")
+@login_required
+def conversations(user):
+    # For the sidebar: each friend's last message and unread count.
+    with get_db() as db:
+        friends = friend_map(db, user["id"])
+        names = {user["id"]: user["username"], **friends}
+        unread_rows = db.execute(
+            "SELECT sender_id, COUNT(*) AS n FROM messages "
+            "WHERE recipient_id = ? AND read_at IS NULL GROUP BY sender_id",
+            (user["id"],),
+        ).fetchall()
+        last_rows = db.execute(
+            """
+            SELECT * FROM messages WHERE id IN (
+                SELECT MAX(id) FROM messages
+                WHERE sender_id = ? OR recipient_id = ?
+                GROUP BY CASE WHEN sender_id = ? THEN recipient_id ELSE sender_id END
+            )
+            """,
+            (user["id"],) * 3,
+        ).fetchall()
+    out = {name: {"unread": 0, "last": None} for name in friends.values()}
+    for r in unread_rows:
+        if r["sender_id"] in friends:
+            out[friends[r["sender_id"]]]["unread"] = r["n"]
+    for r in last_rows:
+        partner = r["recipient_id"] if r["sender_id"] == user["id"] else r["sender_id"]
+        if partner in friends:
+            out[friends[partner]]["last"] = msg_json(r, names)
+    return jsonify({"conversations": out})
+
+
+@app.route("/api/messages/<username>")
+@login_required
+def message_history(user, username):
+    before = request.args.get("before", type=int)        # for "load earlier" later
+    with get_db() as db:
+        other = find_user(db, username)
+        f = get_friendship(db, user["id"], other["id"]) if other else None
+        if f is None or f["status"] != "accepted":
+            return jsonify({"error": "Not a friend"}), 404
+        sql = ("SELECT * FROM messages WHERE ((sender_id = ? AND recipient_id = ?) "
+               "OR (sender_id = ? AND recipient_id = ?))")
+        args = [user["id"], other["id"], other["id"], user["id"]]
+        if before:
+            sql += " AND id < ?"
+            args.append(before)
+        sql += " ORDER BY id DESC LIMIT 101"
+        rows = db.execute(sql, args).fetchall()
+    has_more = len(rows) > 100
+    rows = rows[:100][::-1]                               # oldest first
+    names = {user["id"]: user["username"], other["id"]: other["username"]}
+    return jsonify({"messages": [msg_json(r, names) for r in rows], "has_more": has_more})
+
+
+@app.route("/api/messages/<username>/read", methods=["POST"])
+@login_required
+def mark_read(user, username):
+    with get_db() as db:
+        other = find_user(db, username)
+        if other is None:
+            return jsonify({"error": "Not found"}), 404
+        db.execute(
+            "UPDATE messages SET read_at = ? "
+            "WHERE recipient_id = ? AND sender_id = ? AND read_at IS NULL",
+            (int(time.time() * 1000), user["id"], other["id"]),
+        )
+    return jsonify({"result": "ok"})
         
 
 #-----SOCKETS-----#
 online = {}
 
-#-----CONNECT-----#
+def friend_usernames(user_id):
+    with get_db() as db:
+        rows = db.execute(
+            """
+            SELECT u.username FROM friendships f
+            JOIN users u ON u.id = CASE WHEN f.user_a = ? THEN f.user_b ELSE f.user_a END
+            WHERE (f.user_a = ? OR f.user_b = ?) AND f.status = 'accepted'
+            """,
+            (user_id,) * 3,
+        ).fetchall()
+    return [r["username"] for r in rows]
+
+
+def notify_profile_changed(user): #reload list
+    notify_friends_changed(user["username"], *friend_usernames(user["id"]))
+
+
+def broadcast_presence(name, is_online):
+    with get_db() as db:
+        row = db.execute("SELECT id FROM users WHERE username = ?", (name,)).fetchone()
+    if row is None:
+        return
+    for friend in friend_usernames(row["id"]):
+        socketio.emit("presence", {"username": name, "online": is_online}, to=friend)
+
+
 @socketio.on("connect")
 def handle_connect(auth=None):
     user = current_user()
@@ -528,28 +644,50 @@ def handle_connect(auth=None):
     online[request.sid] = name
     join_room(name)
     if first_tab:
-        socketio.emit("notice", f"{name} joined")
-    socketio.emit("users", online_profiles())
+        socketio.emit("notice", f"{name} joined")      # lobby feed
+        broadcast_presence(name, True)
 
-#-----DISCONNECT-----#
+
 @socketio.on("disconnect")
 def handle_disconnect(reason=None):
     name = online.pop(request.sid, None)
-    if name and name not in online.values():
+    if name and name not in online.values():           # that was their last tab
         socketio.emit("notice", f"{name} left")
-        socketio.emit("users", online_profiles())
+        broadcast_presence(name, False)
 
 
-#-----GROUP MESSAGE-----#
+@socketio.on("presence_request")
+def handle_presence_request():
+    # "Which of my friends are online right now?" Answered to the asker only.
+    name = online.get(request.sid)
+    if name is None:
+        return
+    with get_db() as db:
+        row = db.execute("SELECT id FROM users WHERE username = ?", (name,)).fetchone()
+    friends = friend_usernames(row["id"]) if row else []
+    now_online = set(online.values())
+    emit("presence_list", [f for f in friends if f in now_online])
+
+
 @socketio.on("message")
 def handle_message(text):
+    # The Lobby: open to every logged-in user (temporary, not stored)
     name = online.get(request.sid)
     if name is None or not isinstance(text, str):
         return
     text = text.strip()[:2000]
     if not text:
         return
-    socketio.emit("message", {"name": name, "text": text})
+    if too_fast(name):
+        emit("problem", "You are sending messages too fast")
+        return
+    with get_db() as db:
+        row = db.execute("SELECT display_name FROM users WHERE username = ?", (name,)).fetchone()
+    socketio.emit("message", {
+        "name": name,
+        "display_name": row["display_name"] if row else name,
+        "text": text,
+    })
 
 
 @socketio.on("private")
@@ -562,15 +700,28 @@ def handle_private(data):
     if not text:
         return
     if target == sender:
-        emit("notice", "You can't text yourself")
+        emit("problem", "You can't text yourself")
         return
-    if target not in online.values():
-        emit("notice", f"{target} not available")
+    if too_fast(sender):
+        emit("problem", "You are sending messages too fast")
         return
-    payload = {"from": sender, "to": target, "text": text}
-    socketio.emit("private", payload, to=target)
-    socketio.emit("private", payload, to=sender)
-
+    with get_db() as db:
+        me = find_user(db, sender)
+        other = find_user(db, target)
+        f = get_friendship(db, me["id"], other["id"]) if me and other else None
+        if f is None or f["status"] != "accepted":        # the server enforces this rule
+            emit("problem", "You can only message friends")
+            return
+        now = int(time.time() * 1000)                     # the SERVER decides the time
+        cur = db.execute(
+            "INSERT INTO messages (sender_id, recipient_id, body, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (me["id"], other["id"], text, now),
+        )
+        msg_id = cur.lastrowid
+    payload = {"id": msg_id, "from": sender, "to": target, "text": text, "ts": now}
+    socketio.emit("private", payload, to=target)          # no-op if they are offline
+    socketio.emit("private", payload, to=sender)          # all of the sender's tabs
 
 init_db()
 if __name__ == "__main__":
