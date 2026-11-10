@@ -9,6 +9,7 @@ export default function ChatWindow({
   lines,
   peerOffline,
   ready,
+  typing,
 }) {
   const listRef = useRef(null);
 
@@ -23,15 +24,23 @@ export default function ChatWindow({
   const title = isGroup ? "Lobby" : shown(active);
   const subtitle = isGroup
     ? "Open to everyone (temporary)"
-    : `@${active} · ${peerOffline ? "offline" : "online"}`;
+    : typing
+      ? "typing..."
+      : `@${active} · ${peerOffline ? "offline" : "online"}`;
 
   return (
     <>
       <header className="top">
-        <Avatar profile={isGroup ? null : profiles[active]} name={title} />
+        <Avatar
+          profile={isGroup ? null : profiles[active]}
+          name={title}
+          online={isGroup ? undefined : !peerOffline}
+        />
         <div>
           <div className="title">{title}</div>
-          <div className="sub">{subtitle}</div>
+          <div className="sub" aria-live="polite">
+            {subtitle}
+          </div>
         </div>
       </header>
 

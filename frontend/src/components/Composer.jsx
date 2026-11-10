@@ -1,12 +1,18 @@
 import { useState } from "react";
 
-export default function Composer({ onSend, disabled, placeholder }) {
+export default function Composer({ onSend, onTyping, disabled, placeholder }) {
   const [text, setText] = useState("");
+
+  function change(e) {
+    setText(e.target.value);
+    onTyping?.(e.target.value.trim().length > 0); // false when the box is emptied
+  }
 
   function submit(e) {
     e.preventDefault();
     if (disabled || !text.trim()) return;
     onSend(text);
+    onTyping?.(false);
     setText("");
   }
 
@@ -14,7 +20,7 @@ export default function Composer({ onSend, disabled, placeholder }) {
     <form className="composer" onSubmit={submit}>
       <input
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={change}
         placeholder={placeholder}
         aria-label="Message"
         disabled={disabled}

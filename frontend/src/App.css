@@ -494,3 +494,12 @@ input:focus-visible {
   .friends-row span:not(.badge) { display: none; }
   .empty { display: none; }
 }
+
+/* ---- presence and typing ---- */
+.avatar-wrap { position: relative; display: inline-flex; flex: none; }
+.dot {
+  position: absolute; right: 0; bottom: 0;
+  width: 0.95rem; height: 0.95rem; border-radius: 50%;
+  background: #15803D; border: 2px solid #fff;
+}
+.contact-preview.typing { color: var(--accent); font-style: italic; }

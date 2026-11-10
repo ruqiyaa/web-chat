@@ -18,6 +18,8 @@ function Contact({
   time,
   count,
   onOpen,
+  typing,
+  isFriend,
 }) {
   return (
     <button
@@ -26,13 +28,19 @@ function Contact({
       aria-current={isActive ? "true" : undefined}
       onClick={onOpen}
     >
-      <Avatar profile={profile} name={label} />
+      <Avatar
+        profile={profile}
+        name={label}
+        online={isFriend ? !offline : undefined}
+      />
       <span className="contact-body">
         <span className="contact-top">
           <span className="contact-name">{label}</span>
           {offline && <span className="contact-state">offline</span>}
         </span>
-        <span className="contact-preview">{preview || "No messages yet"}</span>
+        <span className={typing ? "contact-preview typing" : "contact-preview"}>
+          {typing ? "typing..." : preview || "No messages yet"}
+        </span>{" "}
       </span>
       <span className="contact-meta">
         {time && <span className="contact-time">{time}</span>}
@@ -64,6 +72,7 @@ export default function Sidebar({
   onOpen,
   onProfile,
   onFriends,
+  typingFrom,
 }) {
   const keys = ["group", ...friends.map((f) => f.username)];
   const shown = (u) => profiles[u]?.display_name || u;
@@ -152,6 +161,8 @@ export default function Sidebar({
           time={row.time}
           count={row.count}
           onOpen={() => onOpen(row.key)}
+          typing={!!typingFrom[row.key]}
+          isFriend={row.key != "group"}
         />
       ))}
     </nav>

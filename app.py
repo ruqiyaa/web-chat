@@ -723,6 +723,24 @@ def handle_private(data):
     socketio.emit("private", payload, to=target)          # no-op if they are offline
     socketio.emit("private", payload, to=sender)          # all of the sender's tabs
 
+
+@socketio.on("typing")
+def handle_typing(data):
+    sender = online.get(request.sid)
+    if sender is None or not isinstance(data, dict):
+        return
+    target = str(data.get("to", "")).strip().lower()
+    if target == sender or blocked(("typing", sender), 12, 10):
+        return
+    hit(("typing", sender))
+    with get_db() as db:
+        me = find_user(db, sender)
+        other = find_user(db, target)
+        f = get_friendship(db, me["id"], other["id"]) if me and other else None
+    if f is None or f["status"] != "accepted":
+        return
+    socketio.emit("typing", {"from": sender, "typing": data.get("typing") is True}, to=target)
+
 init_db()
 if __name__ == "__main__":
     socketio.run(app, port=5001, debug=True)

@@ -32,12 +32,15 @@ export function useChat(user) {
   const [online, setOnline] = useState([]);                 // friends who are online
   const [friendData, setFriendData] = useState(NO_FRIENDS);
   const [loaded, setLoaded] = useState({});                 // chats whose history is loaded
+  const [typingFrom, setTypingFrom] = useState({});         // { username: true while typing }
   const [problem, setProblem] = useState("");
   const [connected, setConnected] = useState(false);
   const socketRef = useRef(null);
   const activeRef = useRef("group");
   const requested = useRef(new Set());                      // history already requested
   const problemTimer = useRef(null);
+  const typingTimers = useRef({});                          // expiry timers, one per person
+  const lastTypingSent = useRef(0);
 
   const loadFriends = useCallback(async () => {
     try {
@@ -113,6 +116,18 @@ export function useChat(user) {
     const bump = (key) =>
       setUnread((prev) => ({ ...prev, [key]: (prev[key] || 0) + 1 }));
 
+    // Show or clear "typing..." for one person; it clears itself after 4 seconds.
+    const setTyping = (u, on) => {
+      clearTimeout(typingTimers.current[u]);
+      if (on) {
+        typingTimers.current[u] = setTimeout(
+          () => setTypingFrom((p) => ({ ...p, [u]: false })),
+          4000
+        );
+      }
+      setTypingFrom((p) => ({ ...p, [u]: on }));
+    };
+
     socket.on("connect", () => {
       setConnected(true);
       socket.emit("presence_request");
@@ -122,17 +137,20 @@ export function useChat(user) {
     socket.on("connect_error", () => setConnected(false));
 
     socket.on("presence_list", (list) => setOnline(list));
-    socket.on("presence", ({ username, online: isOn }) =>
+    socket.on("presence", ({ username, online: isOn }) => {
+      if (!isOn) setTyping(username, false);               // gone offline: no longer typing
       setOnline((prev) =>
         isOn
           ? prev.includes(username) ? prev : [...prev, username]
           : prev.filter((u) => u !== username)
-      )
-    );
+      );
+    });
     socket.on("friends_changed", () => {
       loadFriends();
       socket.emit("presence_request");
     });
+
+    socket.on("typing", ({ from, typing }) => setTyping(from, typing === true));
 
     socket.on("message", (msg) => {
       addTo("group", { kind: "message", time: fmtTime(Date.now()), ...msg });
@@ -145,6 +163,7 @@ export function useChat(user) {
       const line = toLine(msg);
       setChats((prev) => ({ ...prev, [other]: mergeById(prev[other] || [], [line]) }));
       if (msg.from !== name) {
+        setTyping(msg.from, false);                         // their message arrived
         if (activeRef.current === other) markRead(other);   // you are looking at it
         else bump(other);
       }
@@ -158,6 +177,7 @@ export function useChat(user) {
 
     return () => {
       clearTimeout(problemTimer.current);
+      Object.values(typingTimers.current).forEach(clearTimeout);
       socket.disconnect();
     };
   }, [name, loadFriends, loadConversations, markRead]);
@@ -183,8 +203,22 @@ export function useChat(user) {
     else socketRef.current.emit("private", { to: active, text });
   }
 
+  // Tell the open friend we are typing (at most once every 2.5 seconds).
+  function typing(isTyping) {
+    const to = activeRef.current;
+    if (to === "group") return;
+    const now = Date.now();
+    if (isTyping) {
+      if (now - lastTypingSent.current < 2500) return;
+      lastTypingSent.current = now;
+    } else {
+      lastTypingSent.current = 0;
+    }
+    socketRef.current?.emit("typing", { to, typing: isTyping });
+  }
+
   return {
-    name, chats, active, unread, online, profiles, loaded, problem,
-    friendData, loadFriends, connected, openChat, send,
+    name, chats, active, unread, online, profiles, loaded, problem, typingFrom,
+    friendData, loadFriends, connected, openChat, send, typing,
   };
 }

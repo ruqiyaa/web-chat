@@ -30,6 +30,7 @@ export default function ChatApp({ user, onUserChange, onLogout }) {
         onOpen={chat.openChat}
         onProfile={() => setModal("profile")}
         onFriends={() => setModal("friends")}
+        typingFrom={chat.typingFrom}
       />
       <main className="chat">
         {!chat.connected && (
@@ -51,11 +52,13 @@ export default function ChatApp({ user, onUserChange, onLogout }) {
           lines={chat.chats[chat.active] || EMPTY}
           peerOffline={peerOffline}
           ready={chat.active === "group" || !!chat.loaded[chat.active]}
+          typing={!!chat.typingFrom[chat.active]}
         />
         <Composer
           key={chat.active}
           onSend={chat.send}
           placeholder="Type a message"
+          onTyping={chat.typing}
         />
       </main>
       {modal === "profile" && (
