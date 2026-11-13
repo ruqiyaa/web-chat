@@ -680,26 +680,6 @@ def create_group(user):
                               "member_count": len(usernames) + 1}}), 201
 
 
-@app.route("/api/groups")
-@login_required
-def list_groups(user):
-    with get_db() as db:
-        rows = db.execute(
-            """
-            SELECT g.id, g.name, m.role,
-                   (SELECT COUNT(*) FROM group_members WHERE group_id = g.id) AS member_count
-            FROM group_members m
-            JOIN chat_groups g ON g.id = m.group_id
-            WHERE m.user_id = ?
-            ORDER BY g.id
-            """,
-            (user["id"],),
-        ).fetchall()
-    return jsonify({"groups": [
-        {"id": r["id"], "name": r["name"], "my_role": r["role"], "member_count": r["member_count"]}
-        for r in rows
-    ]})
-
 
 @app.route("/api/groups/<int:gid>")
 @login_required
@@ -722,7 +702,136 @@ def group_detail(user, gid):
     members = [{**profile_card(r), "role": r["role"]} for r in rows]
     return jsonify({"group": {"id": g["id"], "name": g["name"], "my_role": role, "members": members}})
 
-        
+
+class GroupError(Exception):
+    #problem we want to tell the sender in plain words
+    pass
+
+def group_msg_json(r):
+     # r is a row from group_messages joined with users (for username and display_name)
+    return {"id": r["id"], "group_id": r["group_id"], "from": r["username"],
+            "display_name": r["display_name"], "text": r["body"], "ts": r["created_at"]}
+
+def post_group_message(user, gid, text):
+    # Saves the message and returns (payload, usernames to deliver it to).
+    # The socket handler stays thin; the rules live here, where they can be tested.
+    text = text.strip()[:2000]
+    if not text:
+        raise GroupError("Empty message")
+    with get_db() as db:
+        if group_role(db, gid, user["id"]) is None:
+            raise GroupError("You are not in that group")
+        now = int(time.time() * 1000)                        # the SERVER decides the time
+        cur = db.execute(
+            "INSERT INTO group_messages (group_id, sender_id, body, created_at) VALUES (?, ?, ?, ?)",
+            (gid, user["id"], text, now),
+        )
+        mid = cur.lastrowid
+        rows = db.execute(                                   # who is in the group right now
+            "SELECT u.username FROM group_members m JOIN users u ON u.id = m.user_id "
+            "WHERE m.group_id = ?",
+            (gid,),
+        ).fetchall()
+    payload = {"id": mid, "group_id": gid, "from": user["username"],
+               "display_name": user["display_name"], "text": text, "ts": now}
+    return payload, [r["username"] for r in rows]
+
+
+@socketio.on("group_message")
+def handle_group_message(data):
+    sender = online.get(request.sid)
+    if sender is None or not isinstance(data, dict):
+        return
+    gid = data.get("group_id")
+    text = data.get("text")
+    if not isinstance(gid, int) or isinstance(gid, bool) or not isinstance(text, str):
+        return
+    if too_fast(sender):
+        emit("problem", "You are sending messages too fast")
+        return
+    with get_db() as db:
+        user = find_user(db, sender)
+    try:
+        payload, recipients = post_group_message(user, gid, text)
+    except GroupError as e:
+        emit("problem", str(e))
+        return
+    for username in recipients:                              # each person's own room
+        socketio.emit("group_message", payload, to=username)
+
+
+@app.route("/api/groups")
+@login_required
+def list_groups(user):
+    with get_db() as db:
+        rows = db.execute(
+            """
+            SELECT g.id, g.name, m.role,
+                   (SELECT COUNT(*) FROM group_members WHERE group_id = g.id) AS member_count,
+                   (SELECT COUNT(*) FROM group_messages gm
+                     WHERE gm.group_id = g.id AND gm.id > m.last_read_id
+                       AND gm.sender_id != ?) AS unread
+            FROM group_members m
+            JOIN chat_groups g ON g.id = m.group_id
+            WHERE m.user_id = ?
+            ORDER BY g.id
+            """,
+            (user["id"], user["id"]),
+        ).fetchall()
+        out = []
+        for r in rows:
+            last = db.execute(
+                """
+                SELECT gm.*, u.username, u.display_name FROM group_messages gm
+                JOIN users u ON u.id = gm.sender_id
+                WHERE gm.group_id = ? ORDER BY gm.id DESC LIMIT 1
+                """,
+                (r["id"],),
+            ).fetchone()
+            out.append({
+                "id": r["id"], "name": r["name"], "my_role": r["role"],
+                "member_count": r["member_count"], "unread": r["unread"],
+                "last": group_msg_json(last) if last else None,
+            })
+    return jsonify({"groups": out})
+
+
+@app.route("/api/groups/<int:gid>/messages")
+@login_required
+def group_history(user, gid):
+    before = request.args.get("before", type=int)
+    with get_db() as db:
+        if group_role(db, gid, user["id"]) is None:
+            return jsonify({"error": "Group not found"}), 404
+        sql = ("SELECT gm.*, u.username, u.display_name FROM group_messages gm "
+               "JOIN users u ON u.id = gm.sender_id WHERE gm.group_id = ?")
+        args = [gid]
+        if before:
+            sql += " AND gm.id < ?"
+            args.append(before)
+        sql += " ORDER BY gm.id DESC LIMIT 101"
+        rows = db.execute(sql, args).fetchall()
+    has_more = len(rows) > 100
+    rows = rows[:100][::-1]                                  # oldest first
+    return jsonify({"messages": [group_msg_json(r) for r in rows], "has_more": has_more})
+
+
+@app.route("/api/groups/<int:gid>/read", methods=["POST"])
+@login_required
+def group_mark_read(user, gid):
+    with get_db() as db:
+        if group_role(db, gid, user["id"]) is None:
+            return jsonify({"error": "Group not found"}), 404
+        db.execute(
+            """
+            UPDATE group_members
+            SET last_read_id = (SELECT COALESCE(MAX(id), 0) FROM group_messages WHERE group_id = ?)
+            WHERE group_id = ? AND user_id = ?
+            """,
+            (gid, gid, user["id"]),
+        )
+    return jsonify({"result": "ok"})
+           
 
 #-----SOCKETS-----#
 online = {}
