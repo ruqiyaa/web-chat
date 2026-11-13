@@ -603,6 +603,125 @@ def mark_read(user, username):
             (int(time.time() * 1000), user["id"], other["id"]),
         )
     return jsonify({"result": "ok"})
+
+
+#-----GROUPS-----#
+
+MAX_GROUP_MEMBERS = 50
+
+def group_role(db, group_id, user_id):
+    row = db.execute(
+        "SELECT role FROM group_members WHERE group_id = ? AND user_id = ?",
+        (group_id, user_id),
+    ).fetchone()
+    return row["role"] if row else None
+
+def notify_groups_changed(*usernames):
+    for u in set(usernames):
+        socketio.emit("groups_changed", to=u)
+
+
+@app.route("/api/groups", methods=["POST"])
+@login_required
+def create_group(user):
+    if blocked(("gcreate", user["id"]), 10, 3600):
+        return jsonify({"error": "You are creating groups too fast. Try later"}), 429
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "Invalid request data"}), 400
+
+    name = data.get("name")
+    wanted = data.get("members")
+    if not isinstance(name, str) or not isinstance(wanted, list):
+        return jsonify({"error": "Invalid request data"}), 400
+    if not all(isinstance(w, str) for w in wanted):
+        return jsonify({"error": "Invalid request data"}), 400
+
+    name = " ".join(name.split())
+    if not 1 <= len(name) <= 40:
+        return jsonify({"error": "Group name must be 1-40 characters"}), 400
+
+    #clean the list--lowercase, no repeats and not yourself
+    usernames = []
+    for w in wanted:
+        w = w.strip().lower()
+        if w and w != user["username"] and w not in usernames:
+            usernames.append(w)
+    if not usernames:
+        return jsonify({"error": "Pick atleast one friend"}), 400
+    if len(usernames) + 1 > MAX_GROUP_MEMBERS:
+        return jsonify({"error": f"A group can have max {MAX_GROUP_MEMBERS} members"}), 400
+
+    with get_db() as db:
+        friends = friend_map(db, user["id"])
+        id_of = {uname: uid for uid, uname in friends.items()}
+        if any(u not in id_of for u in usernames):
+            # same answer for "not a friend" and "does not exist"
+            return jsonify({"error": "You can only add your friends to a group"}), 400
+
+        now = int(time.time())
+        cur = db.execute(
+            "INSERT INTO chat_groups (name, created_by, created_at) VALUES (?, ?, ?)",
+            (name, user["id"], now),
+        )
+        gid = cur.lastrowid
+        db.execute(
+            "INSERT INTO group_members (group_id, user_id, role, joined_at) VALUES (?, ?, 'admin', ?)",
+            (gid, user["id"], now),
+        )
+        for u in usernames:
+            db.execute(
+                "INSERT INTO group_members (group_id, user_id, role, joined_at) VALUES (?, ?, 'member', ?)",
+                (gid, id_of[u], now),
+            )
+    hit(("gcreate", user["id"]))
+    notify_groups_changed(user["username"], *usernames)
+    return jsonify({"group": {"id": gid, "name": name, "my_role": "admin",
+                              "member_count": len(usernames) + 1}}), 201
+
+
+@app.route("/api/groups")
+@login_required
+def list_groups(user):
+    with get_db() as db:
+        rows = db.execute(
+            """
+            SELECT g.id, g.name, m.role,
+                   (SELECT COUNT(*) FROM group_members WHERE group_id = g.id) AS member_count
+            FROM group_members m
+            JOIN chat_groups g ON g.id = m.group_id
+            WHERE m.user_id = ?
+            ORDER BY g.id
+            """,
+            (user["id"],),
+        ).fetchall()
+    return jsonify({"groups": [
+        {"id": r["id"], "name": r["name"], "my_role": r["role"], "member_count": r["member_count"]}
+        for r in rows
+    ]})
+
+
+@app.route("/api/groups/<int:gid>")
+@login_required
+def group_detail(user, gid):
+    with get_db() as db:
+        role = group_role(db, gid, user["id"])
+        if role is None:
+            # the same answer whether the group does not exist or you are not in it
+            return jsonify({"error": "Group not found"}), 404
+        g = db.execute("SELECT * FROM chat_groups WHERE id = ?", (gid,)).fetchone()
+        rows = db.execute(
+            """
+            SELECT u.*, m.role FROM group_members m
+            JOIN users u ON u.id = m.user_id
+            WHERE m.group_id = ?
+            ORDER BY m.role, u.username
+            """,
+            (gid,),
+        ).fetchall()
+    members = [{**profile_card(r), "role": r["role"]} for r in rows]
+    return jsonify({"group": {"id": g["id"], "name": g["name"], "my_role": role, "members": members}})
+
         
 
 #-----SOCKETS-----#
