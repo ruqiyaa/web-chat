@@ -62,4 +62,33 @@ def init_db():
         db.execute("CREATE INDEX IF NOT EXISTS idx_msg_pair ON messages (sender_id, recipient_id, id)")
         db.execute("CREATE INDEX IF NOT EXISTS idx_msg_unread ON messages (recipient_id, read_at)")
 
-        
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS chat_groups (
+                id              INTEGER PRIMARY KEY,
+                name            TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 40),
+                created_by      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                created_at      INTEGER NOT NULL
+            )
+        """)
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS group_members (
+                group_id        INTEGER NOT NULL REFERENCES chat_groups(id) ON DELETE CASCADE,
+                user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                role            TEXT NOT NULL CHECK (role IN ('admin', 'member')),
+                last_read_id    INTEGER NOT NULL DEFAULT 0,
+                joined_at       INTEGER NOT NULL,
+                PRIMARY KEY (group_id, user_id)
+            )
+        """
+        )
+        db.execute("CREATE INDEX IF NOT EXISTS idx_members_user ON group_members (user_id)")
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS group_messages (
+                id          INTEGER PRIMARY KEY,
+                group_id    INTEGER NOT NULL REFERENCES chat_groups(id) ON DELETE CASCADE,
+                sender_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                body        TEXT NOT NULL CHECK (length(body) BETWEEN 1 AND 2000),
+                created_at  INTEGER NOT NULL
+            )
+        """)
+        db.execute("CREATE INDEX IF NOT EXISTS idx_gmsg_group ON group_messages (group_id, id)")
