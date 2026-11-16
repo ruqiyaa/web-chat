@@ -5,7 +5,7 @@ export default function ChatWindow({
   name,
   profiles,
   active,
-  online,
+  group,
   lines,
   peerOffline,
   ready,
@@ -13,6 +13,7 @@ export default function ChatWindow({
 }) {
   const listRef = useRef(null);
 
+  // Scroll to the bottom when a new message arrives or history finishes loading.
   const lastLine = lines[lines.length - 1];
   useEffect(() => {
     const el = listRef.current;
@@ -20,21 +21,34 @@ export default function ChatWindow({
   }, [lastLine, active, ready]);
 
   const shown = (u) => profiles[u]?.display_name || u;
-  const isGroup = active === "group";
-  const title = isGroup ? "Lobby" : shown(active);
-  const subtitle = isGroup
+  const isLobby = active === "group";
+  const isGroup = active.startsWith("g:");
+  const isFriend = !isLobby && !isGroup;
+  const many = isLobby || isGroup; // chats with more than two people
+
+  const title = isLobby
+    ? "Lobby"
+    : isGroup
+      ? group?.name || "Group"
+      : shown(active);
+  const count = group?.member_count;
+  const subtitle = isLobby
     ? "Open to everyone (temporary)"
-    : typing
-      ? "typing..."
-      : `@${active} · ${peerOffline ? "offline" : "online"}`;
+    : isGroup
+      ? count
+        ? `${count} member${count === 1 ? "" : "s"}`
+        : ""
+      : typing
+        ? "typing..."
+        : `@${active} · ${peerOffline ? "offline" : "online"}`;
 
   return (
     <>
       <header className="top">
         <Avatar
-          profile={isGroup ? null : profiles[active]}
+          profile={isFriend ? profiles[active] : null}
           name={title}
-          online={isGroup ? undefined : !peerOffline}
+          online={isFriend ? !peerOffline : undefined}
         />
         <div>
           <div className="title">{title}</div>
@@ -55,7 +69,7 @@ export default function ChatWindow({
               key={i}
               className={line.name === name ? "bubble mine" : "bubble theirs"}
             >
-              {line.name !== name && isGroup && (
+              {line.name !== name && many && (
                 <span className="who">
                   {line.display_name || shown(line.name)}
                 </span>

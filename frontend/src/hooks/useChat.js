@@ -4,6 +4,18 @@ import { api } from "../api";
 
 const NO_FRIENDS = { friends: [], incoming: [], outgoing: [], loaded: false };
 
+// Chat keys: "group" is the Lobby, "g:12" is a group, anything else is a friend's username.
+const isGroupKey = (id) => id.startsWith("g:");
+const groupIdOf = (id) => id.slice(2);
+const historyUrl = (id) =>
+  isGroupKey(id)
+    ? `/api/groups/${groupIdOf(id)}/messages`
+    : `/api/messages/${encodeURIComponent(id)}`;
+const readUrl = (id) =>
+  isGroupKey(id)
+    ? `/api/groups/${groupIdOf(id)}/read`
+    : `/api/messages/${encodeURIComponent(id)}/read`;
+
 // Today's messages show the time; older ones show the date and the time.
 function fmtTime(ts) {
   const d = new Date(ts);
@@ -14,7 +26,10 @@ function fmtTime(ts) {
 
 // A message from the server -> a line the chat window can draw.
 function toLine(m) {
-  return { kind: "message", id: m.id, name: m.from, text: m.text, ts: m.ts, time: fmtTime(m.ts) };
+  return {
+    kind: "message", id: m.id, name: m.from, display_name: m.display_name,
+    text: m.text, ts: m.ts, time: fmtTime(m.ts),
+  };
 }
 
 // Combine two lists of saved messages: no duplicates (same id), oldest first.
@@ -31,6 +46,8 @@ export function useChat(user) {
   const [unread, setUnread] = useState({});
   const [online, setOnline] = useState([]);                 // friends who are online
   const [friendData, setFriendData] = useState(NO_FRIENDS);
+  const [groups, setGroups] = useState([]);                 // groups I am in
+  const [groupsLoaded, setGroupsLoaded] = useState(false);
   const [loaded, setLoaded] = useState({});                 // chats whose history is loaded
   const [typingFrom, setTypingFrom] = useState({});         // { username: true while typing }
   const [problem, setProblem] = useState("");
@@ -51,15 +68,15 @@ export function useChat(user) {
     }
   }, []);
 
-  const markRead = useCallback((username) => {
-    api(`/api/messages/${encodeURIComponent(username)}/read`, { method: "POST" }).catch(() => {});
+  const markRead = useCallback((id) => {
+    api(readUrl(id), { method: "POST" }).catch(() => {});
   }, []);
 
   const loadHistory = useCallback(async (id) => {
     if (requested.current.has(id)) return;
     requested.current.add(id);
     try {
-      const res = await api(`/api/messages/${encodeURIComponent(id)}`);
+      const res = await api(historyUrl(id));
       if (res.ok) {
         const lines = res.data.messages.map(toLine);
         setChats((prev) => ({ ...prev, [id]: mergeById(prev[id] || [], lines) }));
@@ -90,7 +107,37 @@ export function useChat(user) {
         }
         return next;
       });
-      if (activeRef.current !== "group") markRead(activeRef.current);
+      if (activeRef.current !== "group" && !isGroupKey(activeRef.current)) {
+        markRead(activeRef.current);
+      }
+    } catch {
+      // offline: keep what we have
+    }
+  }, [markRead]);
+
+  // The groups I am in, with each one's last message and unread count.
+  const loadGroups = useCallback(async () => {
+    try {
+      const res = await api("/api/groups");
+      if (!res.ok) return;
+      const list = res.data.groups;
+      setGroups(list);
+      setGroupsLoaded(true);
+      const counts = {};
+      for (const g of list) {
+        const key = `g:${g.id}`;
+        counts[key] = key === activeRef.current ? 0 : g.unread;
+      }
+      setUnread((prev) => ({ ...prev, ...counts }));
+      setChats((prev) => {
+        const next = { ...prev };
+        for (const g of list) {
+          const key = `g:${g.id}`;
+          if (g.last) next[key] = mergeById(next[key] || [], [toLine(g.last)]);
+        }
+        return next;
+      });
+      if (isGroupKey(activeRef.current)) markRead(activeRef.current);
     } catch {
       // offline: keep what we have
     }
@@ -132,6 +179,7 @@ export function useChat(user) {
       setConnected(true);
       socket.emit("presence_request");
       loadConversations();
+      loadGroups();
     });
     socket.on("disconnect", () => setConnected(false));
     socket.on("connect_error", () => setConnected(false));
@@ -149,6 +197,7 @@ export function useChat(user) {
       loadFriends();
       socket.emit("presence_request");
     });
+    socket.on("groups_changed", () => loadGroups());
 
     socket.on("typing", ({ from, typing }) => setTyping(from, typing === true));
 
@@ -169,6 +218,16 @@ export function useChat(user) {
       }
     });
 
+    socket.on("group_message", (msg) => {
+      const key = `g:${msg.group_id}`;
+      const line = toLine(msg);
+      setChats((prev) => ({ ...prev, [key]: mergeById(prev[key] || [], [line]) }));
+      if (msg.from !== name) {
+        if (activeRef.current === key) markRead(key);       // you are looking at it
+        else bump(key);
+      }
+    });
+
     socket.on("problem", (text) => {
       setProblem(text);
       clearTimeout(problemTimer.current);
@@ -180,12 +239,17 @@ export function useChat(user) {
       Object.values(typingTimers.current).forEach(clearTimeout);
       socket.disconnect();
     };
-  }, [name, loadFriends, loadConversations, markRead]);
+  }, [name, loadFriends, loadConversations, loadGroups, markRead]);
 
-  // If the person you were chatting with stops being your friend, go back to the Lobby.
+  // If the chat you have open is gone (unfriended, or no longer in that group), go to the Lobby.
   useEffect(() => {
-    if (friendData.loaded && active !== "group" && !profiles[active]) openChat("group");
-  }, [friendData, active, profiles]);
+    if (active === "group") return;
+    if (isGroupKey(active)) {
+      if (groupsLoaded && !groups.some((g) => `g:${g.id}` === active)) openChat("group");
+    } else if (friendData.loaded && !profiles[active]) {
+      openChat("group");
+    }
+  }, [friendData, groups, groupsLoaded, active, profiles]);
 
   function openChat(id) {
     setActive(id);
@@ -199,14 +263,19 @@ export function useChat(user) {
 
   function send(text) {
     if (!text.trim()) return;
-    if (active === "group") socketRef.current.emit("message", text);
-    else socketRef.current.emit("private", { to: active, text });
+    if (active === "group") {
+      socketRef.current.emit("message", text);
+    } else if (isGroupKey(active)) {
+      socketRef.current.emit("group_message", { group_id: Number(groupIdOf(active)), text });
+    } else {
+      socketRef.current.emit("private", { to: active, text });
+    }
   }
 
   // Tell the open friend we are typing (at most once every 2.5 seconds).
   function typing(isTyping) {
     const to = activeRef.current;
-    if (to === "group") return;
+    if (to === "group" || isGroupKey(to)) return;           // no typing signal in groups yet
     const now = Date.now();
     if (isTyping) {
       if (now - lastTypingSent.current < 2500) return;
@@ -219,6 +288,6 @@ export function useChat(user) {
 
   return {
     name, chats, active, unread, online, profiles, loaded, problem, typingFrom,
-    friendData, loadFriends, connected, openChat, send, typing,
+    friendData, loadFriends, groups, loadGroups, connected, openChat, send, typing,
   };
 }

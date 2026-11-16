@@ -64,6 +64,7 @@ export default function Sidebar({
   me,
   profiles,
   friends,
+  groups,
   requestCount,
   active,
   unread,
@@ -73,27 +74,36 @@ export default function Sidebar({
   onProfile,
   onFriends,
   typingFrom,
+  onNewGroup,
 }) {
-  const keys = ["group", ...friends.map((f) => f.username)];
   const shown = (u) => profiles[u]?.display_name || u;
+  const groupName = (key) =>
+    groups.find((g) => `g:${g.id}` === key)?.name || "Group";
+  // keys: "group" = the Lobby, "g:12" = a group, otherwise a friend's username
+  const keys = [
+    "group",
+    ...groups.map((g) => `g:${g.id}`),
+    ...friends.map((f) => f.username),
+  ];
 
   const rows = keys
     .map((key) => {
-      const lines = chats[key] || [];
-      const last = lastMessage(lines);
+      const isLobby = key === "group";
+      const isGroup = key.startsWith("g:");
+      const last = lastMessage(chats[key] || []);
       const mine = last && last.name === name;
       let preview = "";
       if (last) {
         preview =
-          key === "group" || mine
+          isLobby || isGroup || mine
             ? `${mine ? "You" : last.display_name || shown(last.name)}: ${last.text}`
             : last.text;
       }
       return {
         key,
-        count: lines.filter((l) => l.kind === "message").length,
-        label: key === "group" ? "Lobby" : shown(key),
-        profile: key === "group" ? null : profiles[key],
+        isFriend: !isLobby && !isGroup,
+        label: isLobby ? "Lobby" : isGroup ? groupName(key) : shown(key),
+        profile: isLobby || isGroup ? null : profiles[key],
         ts: last ? last.ts : 0,
         time: last ? last.time : "",
         preview,
@@ -143,7 +153,25 @@ export default function Sidebar({
         )}
       </button>
 
-      {friends.length === 0 && (
+      <button type="button" className="friends-row" onClick={onNewGroup}>
+        <svg
+          width="22"
+          height="22"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <circle cx="12" cy="12" r="10" />
+          <path d="M12 8v8M8 12h8" />
+        </svg>
+        <span>New group</span>
+      </button>
+
+      {friends.length === 0 && groups.length === 0 && (
         <p className="empty">
           No friends yet. Tap Friends to find people by username.
         </p>
@@ -154,15 +182,14 @@ export default function Sidebar({
           key={row.key}
           label={row.label}
           profile={row.profile}
+          isFriend={row.isFriend}
           isActive={active === row.key}
           unread={unread[row.key] || 0}
-          offline={row.key !== "group" && !online.includes(row.key)}
+          offline={row.isFriend && !online.includes(row.key)}
+          typing={!!typingFrom[row.key]}
           preview={row.preview}
           time={row.time}
-          count={row.count}
           onOpen={() => onOpen(row.key)}
-          typing={!!typingFrom[row.key]}
-          isFriend={row.key != "group"}
         />
       ))}
     </nav>
