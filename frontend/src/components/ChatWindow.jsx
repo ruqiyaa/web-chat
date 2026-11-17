@@ -10,6 +10,7 @@ export default function ChatWindow({
   peerOffline,
   ready,
   typing,
+  onGroupInfo,
 }) {
   const listRef = useRef(null);
 
@@ -21,34 +22,25 @@ export default function ChatWindow({
   }, [lastLine, active, ready]);
 
   const shown = (u) => profiles[u]?.display_name || u;
-  const isLobby = active === "group";
   const isGroup = active.startsWith("g:");
-  const isFriend = !isLobby && !isGroup;
-  const many = isLobby || isGroup; // chats with more than two people
 
-  const title = isLobby
-    ? "Lobby"
-    : isGroup
-      ? group?.name || "Group"
-      : shown(active);
+  const title = isGroup ? group?.name || "Group" : shown(active);
   const count = group?.member_count;
-  const subtitle = isLobby
-    ? "Open to everyone (temporary)"
-    : isGroup
-      ? count
-        ? `${count} member${count === 1 ? "" : "s"}`
-        : ""
-      : typing
-        ? "typing..."
-        : `@${active} · ${peerOffline ? "offline" : "online"}`;
+  const subtitle = isGroup
+    ? count
+      ? `${count} member${count === 1 ? "" : "s"}`
+      : ""
+    : typing
+      ? "typing..."
+      : `@${active} · ${peerOffline ? "offline" : "online"}`;
 
   return (
     <>
       <header className="top">
         <Avatar
-          profile={isFriend ? profiles[active] : null}
+          profile={isGroup ? null : profiles[active]}
           name={title}
-          online={isFriend ? !peerOffline : undefined}
+          online={isGroup ? undefined : !peerOffline}
         />
         <div>
           <div className="title">{title}</div>
@@ -56,29 +48,28 @@ export default function ChatWindow({
             {subtitle}
           </div>
         </div>
+        {isGroup && group && (
+          <button type="button" className="hdr-btn" onClick={onGroupInfo}>
+            Group info
+          </button>
+        )}
       </header>
 
       <ul className="messages" ref={listRef}>
-        {lines.map((line, i) =>
-          line.kind === "notice" ? (
-            <li key={i} className="notice">
-              {line.text}
-            </li>
-          ) : (
-            <li
-              key={i}
-              className={line.name === name ? "bubble mine" : "bubble theirs"}
-            >
-              {line.name !== name && many && (
-                <span className="who">
-                  {line.display_name || shown(line.name)}
-                </span>
-              )}
-              <span>{line.text}</span>
-              <span className="time">{line.time}</span>
-            </li>
-          ),
-        )}
+        {lines.map((line, i) => (
+          <li
+            key={i}
+            className={line.name === name ? "bubble mine" : "bubble theirs"}
+          >
+            {line.name !== name && isGroup && (
+              <span className="who">
+                {line.display_name || shown(line.name)}
+              </span>
+            )}
+            <span>{line.text}</span>
+            <span className="time">{line.time}</span>
+          </li>
+        ))}
       </ul>
     </>
   );

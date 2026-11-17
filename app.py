@@ -1068,7 +1068,6 @@ def handle_connect(auth=None):
     online[request.sid] = name
     join_room(name)
     if first_tab:
-        socketio.emit("notice", f"{name} joined")      # lobby feed
         broadcast_presence(name, True)
 
 
@@ -1076,7 +1075,6 @@ def handle_connect(auth=None):
 def handle_disconnect(reason=None):
     name = online.pop(request.sid, None)
     if name and name not in online.values():           # that was their last tab
-        socketio.emit("notice", f"{name} left")
         broadcast_presence(name, False)
 
 

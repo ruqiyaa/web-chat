@@ -16,10 +16,9 @@ function Contact({
   offline,
   preview,
   time,
-  count,
-  onOpen,
   typing,
   isFriend,
+  onOpen,
 }) {
   return (
     <button
@@ -40,15 +39,10 @@ function Contact({
         </span>
         <span className={typing ? "contact-preview typing" : "contact-preview"}>
           {typing ? "typing..." : preview || "No messages yet"}
-        </span>{" "}
+        </span>
       </span>
       <span className="contact-meta">
         {time && <span className="contact-time">{time}</span>}
-        {count > 0 && (
-          <span className="contact-count">
-            {count} msg{count === 1 ? "" : "s"}
-          </span>
-        )}
         {unread > 0 && (
           <span className="badge" aria-label={`${unread} unread`}>
             {unread}
@@ -70,40 +64,38 @@ export default function Sidebar({
   unread,
   online,
   chats,
+  typingFrom,
   onOpen,
   onProfile,
   onFriends,
-  typingFrom,
   onNewGroup,
 }) {
   const shown = (u) => profiles[u]?.display_name || u;
   const groupName = (key) =>
     groups.find((g) => `g:${g.id}` === key)?.name || "Group";
-  // keys: "group" = the Lobby, "g:12" = a group, otherwise a friend's username
+  // keys: "g:12" = a group, otherwise a friend's username
   const keys = [
-    "group",
     ...groups.map((g) => `g:${g.id}`),
     ...friends.map((f) => f.username),
   ];
 
   const rows = keys
     .map((key) => {
-      const isLobby = key === "group";
       const isGroup = key.startsWith("g:");
       const last = lastMessage(chats[key] || []);
       const mine = last && last.name === name;
       let preview = "";
       if (last) {
         preview =
-          isLobby || isGroup || mine
+          isGroup || mine
             ? `${mine ? "You" : last.display_name || shown(last.name)}: ${last.text}`
             : last.text;
       }
       return {
         key,
-        isFriend: !isLobby && !isGroup,
-        label: isLobby ? "Lobby" : isGroup ? groupName(key) : shown(key),
-        profile: isLobby || isGroup ? null : profiles[key],
+        isFriend: !isGroup,
+        label: isGroup ? groupName(key) : shown(key),
+        profile: isGroup ? null : profiles[key],
         ts: last ? last.ts : 0,
         time: last ? last.time : "",
         preview,
@@ -171,9 +163,9 @@ export default function Sidebar({
         <span>New group</span>
       </button>
 
-      {friends.length === 0 && groups.length === 0 && (
+      {rows.length === 0 && (
         <p className="empty">
-          No friends yet. Tap Friends to find people by username.
+          No chats yet. Tap Friends to find people by username.
         </p>
       )}
 

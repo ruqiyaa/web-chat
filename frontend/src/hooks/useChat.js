@@ -4,7 +4,7 @@ import { api } from "../api";
 
 const NO_FRIENDS = { friends: [], incoming: [], outgoing: [], loaded: false };
 
-// Chat keys: "group" is the Lobby, "g:12" is a group, anything else is a friend's username.
+// Chat keys: "" means no chat is open, "g:12" is a group, anything else is a friend's username.
 const isGroupKey = (id) => id.startsWith("g:");
 const groupIdOf = (id) => id.slice(2);
 const historyUrl = (id) =>
@@ -42,7 +42,7 @@ function mergeById(a, b) {
 export function useChat(user) {
   const name = user.username;
   const [chats, setChats] = useState({});
-  const [active, setActive] = useState("group");
+  const [active, setActive] = useState("");                 // "" = nothing open yet
   const [unread, setUnread] = useState({});
   const [online, setOnline] = useState([]);                 // friends who are online
   const [friendData, setFriendData] = useState(NO_FRIENDS);
@@ -53,7 +53,7 @@ export function useChat(user) {
   const [problem, setProblem] = useState("");
   const [connected, setConnected] = useState(false);
   const socketRef = useRef(null);
-  const activeRef = useRef("group");
+  const activeRef = useRef("");
   const requested = useRef(new Set());                      // history already requested
   const problemTimer = useRef(null);
   const typingTimers = useRef({});                          // expiry timers, one per person
@@ -107,9 +107,8 @@ export function useChat(user) {
         }
         return next;
       });
-      if (activeRef.current !== "group" && !isGroupKey(activeRef.current)) {
-        markRead(activeRef.current);
-      }
+      const open = activeRef.current;
+      if (open && !isGroupKey(open)) markRead(open);
     } catch {
       // offline: keep what we have
     }
@@ -154,12 +153,6 @@ export function useChat(user) {
     socketRef.current = socket;
     loadFriends();
 
-    // lobby lines only: they are not stored, so the browser stamps them
-    const addTo = (key, line) =>
-      setChats((prev) => ({
-        ...prev,
-        [key]: [...(prev[key] || []), { ...line, ts: Date.now() }],
-      }));
     const bump = (key) =>
       setUnread((prev) => ({ ...prev, [key]: (prev[key] || 0) + 1 }));
 
@@ -201,12 +194,6 @@ export function useChat(user) {
 
     socket.on("typing", ({ from, typing }) => setTyping(from, typing === true));
 
-    socket.on("message", (msg) => {
-      addTo("group", { kind: "message", time: fmtTime(Date.now()), ...msg });
-      if (msg.name !== name && activeRef.current !== "group") bump("group");
-    });
-    socket.on("notice", (note) => addTo("group", { kind: "notice", text: note }));
-
     socket.on("private", (msg) => {
       const other = msg.from === name ? msg.to : msg.from;
       const line = toLine(msg);
@@ -241,31 +228,29 @@ export function useChat(user) {
     };
   }, [name, loadFriends, loadConversations, loadGroups, markRead]);
 
-  // If the chat you have open is gone (unfriended, or no longer in that group), go to the Lobby.
+  // If the chat you have open is gone (unfriended, or no longer in that group), close it.
   useEffect(() => {
-    if (active === "group") return;
+    if (!active) return;
     if (isGroupKey(active)) {
-      if (groupsLoaded && !groups.some((g) => `g:${g.id}` === active)) openChat("group");
+      if (groupsLoaded && !groups.some((g) => `g:${g.id}` === active)) openChat("");
     } else if (friendData.loaded && !profiles[active]) {
-      openChat("group");
+      openChat("");
     }
   }, [friendData, groups, groupsLoaded, active, profiles]);
 
   function openChat(id) {
     setActive(id);
     activeRef.current = id;
-    setUnread((prev) => ({ ...prev, [id]: 0 }));
-    if (id !== "group") {
+    if (id) {
+      setUnread((prev) => ({ ...prev, [id]: 0 }));
       markRead(id);
       loadHistory(id);
     }
   }
 
   function send(text) {
-    if (!text.trim()) return;
-    if (active === "group") {
-      socketRef.current.emit("message", text);
-    } else if (isGroupKey(active)) {
+    if (!text.trim() || !active) return;
+    if (isGroupKey(active)) {
       socketRef.current.emit("group_message", { group_id: Number(groupIdOf(active)), text });
     } else {
       socketRef.current.emit("private", { to: active, text });
@@ -275,7 +260,7 @@ export function useChat(user) {
   // Tell the open friend we are typing (at most once every 2.5 seconds).
   function typing(isTyping) {
     const to = activeRef.current;
-    if (to === "group" || isGroupKey(to)) return;           // no typing signal in groups yet
+    if (!to || isGroupKey(to)) return;                      // no typing signal in groups yet
     const now = Date.now();
     if (isTyping) {
       if (now - lastTypingSent.current < 2500) return;

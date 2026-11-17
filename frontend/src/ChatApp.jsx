@@ -3,24 +3,24 @@ import { useChat } from "./hooks/useChat";
 import Sidebar from "./components/Sidebar";
 import ChatWindow from "./components/ChatWindow";
 import Composer from "./components/Composer";
+import Welcome from "./components/Welcome";
 import ProfileModal from "./components/ProfileModal";
 import FriendsModal from "./components/FriendsModal";
 import CreateGroupModal from "./components/CreateGroupModal";
+import GroupInfoModal from "./components/GroupInfoModal";
 
 const EMPTY = [];
 
 export default function ChatApp({ user, onUserChange, onLogout }) {
   const chat = useChat(user);
-  const [modal, setModal] = useState(null); // "profile", "friends", "newgroup" or null
+  const [modal, setModal] = useState(null); // "profile", "friends", "newgroup", "groupinfo" or null
 
-  const isLobby = chat.active === "group";
   const isGroup = chat.active.startsWith("g:");
   const group = isGroup
     ? chat.groups.find((g) => `g:${g.id}` === chat.active)
     : undefined;
   const peerOffline =
-    !isLobby && !isGroup && !chat.online.includes(chat.active);
-  //const peerName = chat.profiles[chat.active]?.display_name || chat.active;
+    !!chat.active && !isGroup && !chat.online.includes(chat.active);
 
   return (
     <div className="app">
@@ -52,22 +52,29 @@ export default function ChatApp({ user, onUserChange, onLogout }) {
             {chat.problem}
           </div>
         )}
-        <ChatWindow
-          name={chat.name}
-          profiles={chat.profiles}
-          active={chat.active}
-          group={group}
-          lines={chat.chats[chat.active] || EMPTY}
-          peerOffline={peerOffline}
-          ready={isLobby || !!chat.loaded[chat.active]}
-          typing={!!chat.typingFrom[chat.active]}
-        />
-        <Composer
-          key={chat.active}
-          onSend={chat.send}
-          onTyping={chat.typing}
-          placeholder="Type a message"
-        />
+        {chat.active ? (
+          <>
+            <ChatWindow
+              name={chat.name}
+              profiles={chat.profiles}
+              active={chat.active}
+              group={group}
+              lines={chat.chats[chat.active] || EMPTY}
+              peerOffline={peerOffline}
+              ready={!!chat.loaded[chat.active]}
+              typing={!!chat.typingFrom[chat.active]}
+              onGroupInfo={() => setModal("groupinfo")}
+            />
+            <Composer
+              key={chat.active}
+              onSend={chat.send}
+              onTyping={chat.typing}
+              placeholder="Type a message"
+            />
+          </>
+        ) : (
+          <Welcome />
+        )}
       </main>
       {modal === "profile" && (
         <ProfileModal
@@ -91,6 +98,21 @@ export default function ChatApp({ user, onUserChange, onLogout }) {
             await chat.loadGroups(); // make sure the new group is in the list first
             chat.openChat(`g:${g.id}`);
             setModal(null);
+          }}
+          onClose={() => setModal(null)}
+        />
+      )}
+      {modal === "groupinfo" && group && (
+        <GroupInfoModal
+          groupId={group.id}
+          groups={chat.groups}
+          me={chat.name}
+          friends={chat.friendData.friends}
+          onChanged={chat.loadGroups}
+          onLeft={() => {
+            chat.openChat("");
+            setModal(null);
+            chat.loadGroups();
           }}
           onClose={() => setModal(null)}
         />
