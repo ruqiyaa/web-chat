@@ -1,3 +1,5 @@
+import threading
+from collections import deque
 import re
 import os
 import secrets
@@ -7,7 +9,8 @@ import time
 
 from datetime import timedelta
 from pathlib import Path
-from flask import (Flask, render_template, request, jsonify, session, send_from_directory, abort)
+from flask import (Flask, render_template, request, jsonify,
+                   session, send_from_directory, abort)
 from flask_socketio import SocketIO, emit, join_room
 from db import init_db, get_db
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -16,6 +19,7 @@ from functools import wraps
 
 
 app = Flask(__name__)
+
 
 def load_secret_key():
     key = os.environ.get("RAABTA_SECRET_KEY")
@@ -26,6 +30,7 @@ def load_secret_key():
         path.write_text(secrets.token_hex(32))
     return path.read_text().strip()
 
+
 app.secret_key = load_secret_key()
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
@@ -34,10 +39,12 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(days=30),
 )
 
-app.config["MAX_CONTENT_LENGTH"] = 3 * 1024 * 1024 #rejecting uploads over 3mb
+app.config["MAX_CONTENT_LENGTH"] = 3 * \
+    1024 * 1024  # rejecting uploads over 3mb
 AVATAR_DIR = Path(__file__).with_name("uploads") / "avatars"
 AVATAR_DIR.mkdir(parents=True, exist_ok=True)
-MAX_PIXELS = 20_000_000   #guards against img bombs
+MAX_PIXELS = 20_000_000  # guards against img bombs
+
 
 @app.errorhandler(413)
 def too_large(e):
@@ -47,18 +54,17 @@ def too_large(e):
 socketio = SocketIO(app)
 
 
-#----- rate limiting password (kept in memory) ----- #
-from collections import deque
-import threading
+# ----- rate limiting password (kept in memory) ----- #
 
 _hits = {}
 _hits_lock = threading.Lock()
+
 
 def _prune(key, window, now):
     q = _hits.get(key)
     if q is None:
         return 0
-    while q and now - q[0] > window:  #forget events older than window
+    while q and now - q[0] > window:  # forget events older than window
         q.popleft()
     if not q:
         del _hits[key]
@@ -70,29 +76,33 @@ def blocked(key, limit, window=600):
     with _hits_lock:
         return _prune(key, window, time.time()) >= limit
 
+
 def hit(key):
     with _hits_lock:
         if len(_hits) > 10000:
             _hits.clear()
         _hits.setdefault(key, deque()).append(time.time())
 
+
 def reset(key):
     with _hits_lock:
         _hits.pop(key, None)
 
 
-#-----HOME-----#
+# -----HOME-----#
 @app.route("/")
 def home():
     return render_template("index.html")
 
-#-----REGISTER-----#
+# -----REGISTER-----#
+
+
 @app.route("/api/register", methods=["POST"])
 def register():
     ip = request.remote_addr or "unknown"
     if blocked(("register", ip), 10, 3600):
         return jsonify({"error": "Too many sign-ups from this network. Try again later"}), 429
-    
+
     data = request.get_json(silent=True)
 
     if not isinstance(data, dict):
@@ -103,7 +113,7 @@ def register():
     password = data.get("password")
 
     if not all(isinstance(value, str) for value in [username, display_name, password]):
-        return jsonify({"error" : "All fields are required"}), 400
+        return jsonify({"error": "All fields are required"}), 400
 
     username = username.strip().lower()
     display_name = display_name.strip()
@@ -119,7 +129,7 @@ def register():
 
     with get_db() as db:
         existing_user = db.execute(
-            "SELECT id FROM users WHERE username = ?", 
+            "SELECT id FROM users WHERE username = ?",
             (username,)
         ).fetchone()
 
@@ -157,11 +167,14 @@ def register():
         }
     }), 201
 
+
 DUMMY_HASH = generate_password_hash("not-a-real-password")
 
-#-----HELPER-----#
+# -----HELPER-----#
+
+
 def profile_card(row):
-    #what other people see about someone..no id no hash
+    # what other people see about someone..no id no hash
     return {
         "username": row["username"],
         "display_name": row["display_name"],
@@ -169,12 +182,15 @@ def profile_card(row):
         "avatar_url": f"/avatars/{row['avatar']}" if row["avatar"] else None,
     }
 
+
 def public_user(row):
-    return{
+    return {
         "id": row["id"], **profile_card(row)
     }
 
-#-----HELPER-----#
+# -----HELPER-----#
+
+
 def current_user():
     user_id = session.get("user_id")
     if not user_id:
@@ -183,7 +199,7 @@ def current_user():
         return db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
 
 
-#-----LOGIN-----#
+# -----LOGIN-----#
 @app.route("/api/login", methods=["POST"])
 def login():
     data = request.get_json(silent=True)
@@ -200,7 +216,7 @@ def login():
     ip = request.remote_addr or "unknown"
     pair = ("login", ip, username)
 
-    #check limits
+    # check limits
     if blocked(pair, 5) or blocked(("login-ip", ip), 20):
         return jsonify({"error": "Too many attempts. Try again after few minutes."}), 429
 
@@ -224,14 +240,14 @@ def login():
     return jsonify({"user": public_user(row)})
 
 
-#-----LOGOUT-----#
+# -----LOGOUT-----#
 @app.route("/api/logout", methods=["POST"])
 def logout():
     session.clear()
     return jsonify({"message": "Logged out"})
 
 
-#-----HOME PAGE-----#
+# -----HOME PAGE-----#
 @app.route("/api/me")
 def me():
     user = current_user()
@@ -239,7 +255,8 @@ def me():
         return jsonify({"error": "Not logged in"}), 401
     return jsonify({"user": public_user(user)})
 
-#----- PROFILE ------ #
+# ----- PROFILE ------ #
+
 
 @app.route("/api/profile", methods=["PATCH"])
 def update_profile():
@@ -268,10 +285,11 @@ def update_profile():
     return jsonify({"user": public_user(current_user())})
 
 
-#----- AVATAR -----#
+# ----- AVATAR -----#
 def delete_avatar_file(filename):
     if filename:
         (AVATAR_DIR / Path(filename).name).unlink(missing_ok=True)
+
 
 @app.route("/api/avatar", methods=["POST"])
 def upload_avatar():
@@ -285,30 +303,34 @@ def upload_avatar():
         return jsonify({"error": "No file received"}), 400
 
     try:
-        img = Image.open(file.stream)           #reads only header
+        img = Image.open(file.stream)  # reads only header
         if img.format not in ("JPEG", "PNG", "WEBP"):
             return jsonify({"error": "Use only JPEG, PNG or WEBP format"}), 400
         if img.width * img.height > MAX_PIXELS:
             return jsonify({"error": "Image too large"}), 400
-        img = ImageOps.exif_transpose(img)      #phone rotation
+        img = ImageOps.exif_transpose(img)  # phone rotation
         img = img.convert("RGBA")
-        flat = Image.new("RGB", img.size, "white")  #transparent ares become white
+        # transparent ares become white
+        flat = Image.new("RGB", img.size, "white")
         flat.paste(img, mask=img.getchannel("A"))
-        img = ImageOps.fit(flat, (256, 256))        #square crop 256*256
+        img = ImageOps.fit(flat, (256, 256))  # square crop 256*256
 
     except (UnidentifiedImageError, Image.DecompressionBombError, OSError, ValueError):
         return jsonify({"error": "Invalid image"}), 400
 
-    filename = secrets.token_hex(16) + ".jpg"       #random name
-    img.save(AVATAR_DIR / filename, "JPEG", quality=85)     #re-encoded: brand new file
+    filename = secrets.token_hex(16) + ".jpg"  # random name
+    # re-encoded: brand new file
+    img.save(AVATAR_DIR / filename, "JPEG", quality=85)
     hit(("avatar", user["id"]))
 
     with get_db() as db:
-        db.execute("UPDATE users SET avatar = ? WHERE id = ?", (filename, user["id"]))
+        db.execute("UPDATE users SET avatar = ? WHERE id = ?",
+                   (filename, user["id"]))
 
     delete_avatar_file(user["avatar"])
     notify_profile_changed(user)
     return jsonify({"user": public_user(current_user())})
+
 
 @app.route("/api/avatar", methods=["DELETE"])
 def remove_avatar():
@@ -316,7 +338,8 @@ def remove_avatar():
     if user is None:
         return jsonify({"error": "Not logged in"}), 401
     with get_db() as db:
-        db.execute("UPDATE users SET avatar = NULL WHERE id = ?", (user["id"],))
+        db.execute("UPDATE users SET avatar = NULL WHERE id = ?",
+                   (user["id"],))
     delete_avatar_file(user["avatar"])
     notify_profile_changed(user)
     return jsonify({"user": public_user(current_user())})
@@ -326,7 +349,8 @@ def remove_avatar():
 def avatar_file(filename):
     if current_user() is None:                            # only logged-in users see pictures
         abort(401)
-    if not re.fullmatch(r"[0-9a-f]{32}\.jpg", filename):  # only names we generated
+    # only names we generated
+    if not re.fullmatch(r"[0-9a-f]{32}\.jpg", filename):
         abort(404)
     resp = send_from_directory(AVATAR_DIR, filename)
     resp.headers["Cache-Control"] = "private, max-age=86400"
@@ -334,9 +358,9 @@ def avatar_file(filename):
     return resp
 
 
-#----- FRIENDS -----#
+# ----- FRIENDS -----#
 def login_required(fn):
-    #runs a route only for logged in users
+    # runs a route only for logged in users
     @wraps(fn)
     def wrapper(*args, **kwargs):
         user = current_user()
@@ -345,8 +369,10 @@ def login_required(fn):
         return fn(user, *args, **kwargs)
     return wrapper
 
+
 def pair(x, y):
     return (x, y) if x < y else (y, x)
+
 
 def get_friendship(db, me_id, other_id):
     a, b = pair(me_id, other_id)
@@ -354,12 +380,14 @@ def get_friendship(db, me_id, other_id):
         "SELECT * FROM friendships WHERE user_a = ? AND user_b = ?", (a, b)
     ).fetchone()
 
+
 def find_user(db, username):
     if not isinstance(username, str):
         return None
     return db.execute(
         "SELECT * FROM users WHERE username = ?", (username.strip().lower(),)
     ).fetchone()
+
 
 def relation(db, me_id, other_id):
     f = get_friendship(db, me_id, other_id)
@@ -369,13 +397,16 @@ def relation(db, me_id, other_id):
         return "friends"
     return "sent" if f["requested_by"] == me_id else "received"
 
+
 def body_username():
     data = request.get_json(silent=True)
     return data.get("username") if isinstance(data, dict) else None
 
+
 def notify_friends_changed(*usernames):
     for u in set(usernames):
         socketio.emit("friends_changed", to=u)
+
 
 @app.route("/api/users/search")
 @login_required
@@ -442,7 +473,8 @@ def friend_request(user):
             if f["requested_by"] == user["id"]:
                 return jsonify({"error": "Request already sent"}), 409
             # they had already asked us, so adding them back means accepting
-            db.execute("UPDATE friendships SET status = 'accepted' WHERE id = ?", (f["id"],))
+            db.execute(
+                "UPDATE friendships SET status = 'accepted' WHERE id = ?", (f["id"],))
             result = "accepted"
         else:
             a, b = pair(user["id"], target["id"])
@@ -469,7 +501,8 @@ def friend_accept(user):
         # only the person who was ASKED can accept (the other one made the request)
         if f is None or f["status"] != "pending" or f["requested_by"] != target["id"]:
             return jsonify({"error": "No pending request from that user"}), 404
-        db.execute("UPDATE friendships SET status = 'accepted' WHERE id = ?", (f["id"],))
+        db.execute(
+            "UPDATE friendships SET status = 'accepted' WHERE id = ?", (f["id"],))
     notify_friends_changed(user["username"], target["username"])
     return jsonify({"result": "accepted"})
 
@@ -495,7 +528,8 @@ def friend_remove(user, username):
     with get_db() as db:
         target = find_user(db, username)
         f = get_friendship(db, user["id"], target["id"]) if target else None
-        allowed = f is not None and (f["status"] == "accepted" or f["requested_by"] == user["id"])
+        allowed = f is not None and (
+            f["status"] == "accepted" or f["requested_by"] == user["id"])
         if not allowed:
             return jsonify({"error": "Nothing to remove"}), 404
         db.execute("DELETE FROM friendships WHERE id = ?", (f["id"],))
@@ -503,8 +537,7 @@ def friend_remove(user, username):
     return jsonify({"result": "removed"})
 
 
-
-#----- MESSAGES -----#
+# ----- MESSAGES -----#
 def friend_map(db, user_id):
     rows = db.execute(
         """
@@ -515,6 +548,7 @@ def friend_map(db, user_id):
         (user_id,) * 3,
     ).fetchall()
     return {r["id"]: r["username"] for r in rows}
+
 
 def msg_json(row, names):
     return {
@@ -570,7 +604,8 @@ def conversations(user):
 @app.route("/api/messages/<username>")
 @login_required
 def message_history(user, username):
-    before = request.args.get("before", type=int)        # for "load earlier" later
+    # for "load earlier" later
+    before = request.args.get("before", type=int)
     with get_db() as db:
         other = find_user(db, username)
         f = get_friendship(db, user["id"], other["id"]) if other else None
@@ -605,9 +640,10 @@ def mark_read(user, username):
     return jsonify({"result": "ok"})
 
 
-#-----GROUPS-----#
+# -----GROUPS-----#
 
 MAX_GROUP_MEMBERS = 50
+
 
 def group_role(db, group_id, user_id):
     row = db.execute(
@@ -615,6 +651,7 @@ def group_role(db, group_id, user_id):
         (group_id, user_id),
     ).fetchone()
     return row["role"] if row else None
+
 
 def notify_groups_changed(*usernames):
     for u in set(usernames):
@@ -641,7 +678,7 @@ def create_group(user):
     if not 1 <= len(name) <= 40:
         return jsonify({"error": "Group name must be 1-40 characters"}), 400
 
-    #clean the list--lowercase, no repeats and not yourself
+    # clean the list--lowercase, no repeats and not yourself
     usernames = []
     for w in wanted:
         w = w.strip().lower()
@@ -680,7 +717,6 @@ def create_group(user):
                               "member_count": len(usernames) + 1}}), 201
 
 
-
 @app.route("/api/groups/<int:gid>")
 @login_required
 def group_detail(user, gid):
@@ -689,7 +725,8 @@ def group_detail(user, gid):
         if role is None:
             # the same answer whether the group does not exist or you are not in it
             return jsonify({"error": "Group not found"}), 404
-        g = db.execute("SELECT * FROM chat_groups WHERE id = ?", (gid,)).fetchone()
+        g = db.execute("SELECT * FROM chat_groups WHERE id = ?",
+                       (gid,)).fetchone()
         rows = db.execute(
             """
             SELECT u.*, m.role FROM group_members m
@@ -704,13 +741,15 @@ def group_detail(user, gid):
 
 
 class GroupError(Exception):
-    #problem we want to tell the sender in plain words
+    # problem we want to tell the sender in plain words
     pass
 
+
 def group_msg_json(r):
-     # r is a row from group_messages joined with users (for username and display_name)
+    # r is a row from group_messages joined with users (for username and display_name)
     return {"id": r["id"], "group_id": r["group_id"], "from": r["username"],
             "display_name": r["display_name"], "text": r["body"], "ts": r["created_at"]}
+
 
 def post_group_message(user, gid, text):
     # Saves the message and returns (payload, usernames to deliver it to).
@@ -721,7 +760,8 @@ def post_group_message(user, gid, text):
     with get_db() as db:
         if group_role(db, gid, user["id"]) is None:
             raise GroupError("You are not in that group")
-        now = int(time.time() * 1000)                        # the SERVER decides the time
+        # the SERVER decides the time
+        now = int(time.time() * 1000)
         cur = db.execute(
             "INSERT INTO group_messages (group_id, sender_id, body, created_at) VALUES (?, ?, ?, ?)",
             (gid, user["id"], text, now),
@@ -766,10 +806,10 @@ def list_groups(user):
     with get_db() as db:
         rows = db.execute(
             """
-            SELECT g.id, g.name, m.role,
+            SELECT g.id, g.name, m.role, m.first_visible_id,
                    (SELECT COUNT(*) FROM group_members WHERE group_id = g.id) AS member_count,
                    (SELECT COUNT(*) FROM group_messages gm
-                     WHERE gm.group_id = g.id AND gm.id > m.last_read_id
+                     WHERE gm.group_id = g.id AND gm.id > MAX(m.last_read_id, m.first_visible_id)
                        AND gm.sender_id != ?) AS unread
             FROM group_members m
             JOIN chat_groups g ON g.id = m.group_id
@@ -784,9 +824,10 @@ def list_groups(user):
                 """
                 SELECT gm.*, u.username, u.display_name FROM group_messages gm
                 JOIN users u ON u.id = gm.sender_id
-                WHERE gm.group_id = ? ORDER BY gm.id DESC LIMIT 1
+                WHERE gm.group_id = ? AND gm.id > ?
+                ORDER BY gm.id DESC LIMIT 1
                 """,
-                (r["id"],),
+                (r["id"], r["first_visible_id"]),
             ).fetchone()
             out.append({
                 "id": r["id"], "name": r["name"], "my_role": r["role"],
@@ -801,11 +842,16 @@ def list_groups(user):
 def group_history(user, gid):
     before = request.args.get("before", type=int)
     with get_db() as db:
-        if group_role(db, gid, user["id"]) is None:
+        row = db.execute(
+            "SELECT first_visible_id FROM group_members WHERE group_id = ? AND user_id = ?",
+            (gid, user["id"]),
+        ).fetchone()
+        if row is None:
             return jsonify({"error": "Group not found"}), 404
         sql = ("SELECT gm.*, u.username, u.display_name FROM group_messages gm "
-               "JOIN users u ON u.id = gm.sender_id WHERE gm.group_id = ?")
-        args = [gid]
+               "JOIN users u ON u.id = gm.sender_id WHERE gm.group_id = ? AND gm.id > ?")
+        # nothing from before you joined
+        args = [gid, row["first_visible_id"]]
         if before:
             sql += " AND gm.id < ?"
             args.append(before)
@@ -831,10 +877,158 @@ def group_mark_read(user, gid):
             (gid, gid, user["id"]),
         )
     return jsonify({"result": "ok"})
-           
 
-#-----SOCKETS-----#
+# -----GROUP MANAGEMENT-----#
+
+
+def group_member_usernames(db, gid):
+    rows = db.execute(
+        "SELECT u.username FROM group_members m JOIN users u ON u.id = m.user_id "
+        "WHERE m.group_id = ?",
+        (gid,),
+    ).fetchall()
+    return [r["username"] for r in rows]
+
+
+def require_admin(db, gid, user):
+    # None means "allowed". Otherwise it is the error reply to send back.
+    role = group_role(db, gid, user["id"])
+    if role is None:
+        return jsonify({"error": "Group not found"}), 404
+    if role != "admin":
+        return jsonify({"error": "Only admins can do that"}), 403
+    return None
+
+
+@app.route("/api/groups/<int:gid>", methods=["PATCH"])
+@login_required
+def rename_group(user, gid):
+    data = request.get_json(silent=True)
+    name = data.get("name") if isinstance(data, dict) else None
+    if not isinstance(name, str):
+        return jsonify({"error": "Invalid request data"}), 400
+    name = " ".join(name.split())
+    if not 1 <= len(name) <= 40:
+        return jsonify({"error": "Group name must be 1-40 characters"}), 400
+    with get_db() as db:
+        err = require_admin(db, gid, user)
+        if err:
+            return err
+        db.execute("UPDATE chat_groups SET name = ? WHERE id = ?", (name, gid))
+        members = group_member_usernames(db, gid)
+    notify_groups_changed(*members)
+    return jsonify({"result": "renamed", "name": name})
+
+
+@app.route("/api/groups/<int:gid>/members", methods=["POST"])
+@login_required
+def add_members(user, gid):
+    data = request.get_json(silent=True)
+    wanted = data.get("usernames") if isinstance(data, dict) else None
+    if not isinstance(wanted, list) or not wanted or not all(isinstance(w, str) for w in wanted):
+        return jsonify({"error": "Pick at least one friend"}), 400
+    usernames = []
+    for w in wanted:
+        w = w.strip().lower()
+        if w and w not in usernames:
+            usernames.append(w)
+    with get_db() as db:
+        err = require_admin(db, gid, user)
+        if err:
+            return err
+        friends = friend_map(db, user["id"])
+        id_of = {uname: uid for uid, uname in friends.items()}
+        if any(u not in id_of for u in usernames):
+            return jsonify({"error": "You can only add your friends to a group"}), 400
+        current = group_member_usernames(db, gid)
+        new = [u for u in usernames if u not in current]
+        if not new:
+            return jsonify({"error": "They are already in the group"}), 409
+        if len(current) + len(new) > MAX_GROUP_MEMBERS:
+            return jsonify({"error": f"A group can have at most {MAX_GROUP_MEMBERS} members"}), 400
+        # New members only see messages sent from now on.
+        newest = db.execute(
+            "SELECT COALESCE(MAX(id), 0) AS n FROM group_messages WHERE group_id = ?", (gid,)
+        ).fetchone()["n"]
+        now = int(time.time())
+        for u in new:
+            db.execute(
+                "INSERT INTO group_members (group_id, user_id, role, joined_at, first_visible_id) "
+                "VALUES (?, ?, 'member', ?, ?)",
+                (gid, id_of[u], now, newest),
+            )
+    notify_groups_changed(*current, *new)
+    return jsonify({"added": new}), 201
+
+
+@app.route("/api/groups/<int:gid>/members/<username>", methods=["DELETE"])
+@login_required
+def remove_member(user, gid, username):
+    with get_db() as db:
+        err = require_admin(db, gid, user)
+        if err:
+            return err
+        target = find_user(db, username)
+        role = group_role(db, gid, target["id"]) if target else None
+        if role is None:
+            return jsonify({"error": "That person is not in the group"}), 404
+        if target["id"] == user["id"]:
+            return jsonify({"error": "Use Leave group to leave"}), 400
+        if role == "admin":
+            return jsonify({"error": "You cannot remove another admin"}), 403
+        # includes the person being removed
+        members = group_member_usernames(db, gid)
+        db.execute("DELETE FROM group_members WHERE group_id = ? AND user_id = ?",
+                   (gid, target["id"]))
+    notify_groups_changed(*members)
+    return jsonify({"result": "removed"})
+
+
+@app.route("/api/groups/<int:gid>/admins", methods=["POST"])
+@login_required
+def make_admin(user, gid):
+    with get_db() as db:
+        err = require_admin(db, gid, user)
+        if err:
+            return err
+        target = find_user(db, body_username())
+        role = group_role(db, gid, target["id"]) if target else None
+        if role is None:
+            return jsonify({"error": "That person is not in the group"}), 404
+        db.execute("UPDATE group_members SET role = 'admin' WHERE group_id = ? AND user_id = ?",
+                   (gid, target["id"]))
+        members = group_member_usernames(db, gid)
+    notify_groups_changed(*members)
+    return jsonify({"result": "promoted"})
+
+
+@app.route("/api/groups/<int:gid>/leave", methods=["POST"])
+@login_required
+def leave_group(user, gid):
+    with get_db() as db:
+        if group_role(db, gid, user["id"]) is None:
+            return jsonify({"error": "Group not found"}), 404
+        members = group_member_usernames(db, gid)          # includes you
+        db.execute("DELETE FROM group_members WHERE group_id = ? AND user_id = ?",
+                   (gid, user["id"]))
+        left = db.execute(
+            "SELECT user_id, role FROM group_members WHERE group_id = ? ORDER BY joined_at, user_id",
+            (gid,),
+        ).fetchall()
+        if not left:
+            # the last person out closes the group; its messages go with it (CASCADE)
+            db.execute("DELETE FROM chat_groups WHERE id = ?", (gid,))
+        elif not any(r["role"] == "admin" for r in left):
+            # nobody is in charge any more: the longest-standing member becomes admin
+            db.execute("UPDATE group_members SET role = 'admin' WHERE group_id = ? AND user_id = ?",
+                       (gid, left[0]["user_id"]))
+    notify_groups_changed(*members)
+    return jsonify({"result": "left"})
+
+
+# -----SOCKETS-----#
 online = {}
+
 
 def friend_usernames(user_id):
     with get_db() as db:
@@ -849,17 +1043,19 @@ def friend_usernames(user_id):
     return [r["username"] for r in rows]
 
 
-def notify_profile_changed(user): #reload list
+def notify_profile_changed(user):  # reload list
     notify_friends_changed(user["username"], *friend_usernames(user["id"]))
 
 
 def broadcast_presence(name, is_online):
     with get_db() as db:
-        row = db.execute("SELECT id FROM users WHERE username = ?", (name,)).fetchone()
+        row = db.execute(
+            "SELECT id FROM users WHERE username = ?", (name,)).fetchone()
     if row is None:
         return
     for friend in friend_usernames(row["id"]):
-        socketio.emit("presence", {"username": name, "online": is_online}, to=friend)
+        socketio.emit("presence", {"username": name,
+                      "online": is_online}, to=friend)
 
 
 @socketio.on("connect")
@@ -891,7 +1087,8 @@ def handle_presence_request():
     if name is None:
         return
     with get_db() as db:
-        row = db.execute("SELECT id FROM users WHERE username = ?", (name,)).fetchone()
+        row = db.execute(
+            "SELECT id FROM users WHERE username = ?", (name,)).fetchone()
     friends = friend_usernames(row["id"]) if row else []
     now_online = set(online.values())
     emit("presence_list", [f for f in friends if f in now_online])
@@ -910,7 +1107,8 @@ def handle_message(text):
         emit("problem", "You are sending messages too fast")
         return
     with get_db() as db:
-        row = db.execute("SELECT display_name FROM users WHERE username = ?", (name,)).fetchone()
+        row = db.execute(
+            "SELECT display_name FROM users WHERE username = ?", (name,)).fetchone()
     socketio.emit("message", {
         "name": name,
         "display_name": row["display_name"] if row else name,
@@ -937,19 +1135,24 @@ def handle_private(data):
         me = find_user(db, sender)
         other = find_user(db, target)
         f = get_friendship(db, me["id"], other["id"]) if me and other else None
-        if f is None or f["status"] != "accepted":        # the server enforces this rule
+        # the server enforces this rule
+        if f is None or f["status"] != "accepted":
             emit("problem", "You can only message friends")
             return
-        now = int(time.time() * 1000)                     # the SERVER decides the time
+        # the SERVER decides the time
+        now = int(time.time() * 1000)
         cur = db.execute(
             "INSERT INTO messages (sender_id, recipient_id, body, created_at) "
             "VALUES (?, ?, ?, ?)",
             (me["id"], other["id"], text, now),
         )
         msg_id = cur.lastrowid
-    payload = {"id": msg_id, "from": sender, "to": target, "text": text, "ts": now}
-    socketio.emit("private", payload, to=target)          # no-op if they are offline
-    socketio.emit("private", payload, to=sender)          # all of the sender's tabs
+    payload = {"id": msg_id, "from": sender,
+               "to": target, "text": text, "ts": now}
+    # no-op if they are offline
+    socketio.emit("private", payload, to=target)
+    # all of the sender's tabs
+    socketio.emit("private", payload, to=sender)
 
 
 @socketio.on("typing")
@@ -967,7 +1170,9 @@ def handle_typing(data):
         f = get_friendship(db, me["id"], other["id"]) if me and other else None
     if f is None or f["status"] != "accepted":
         return
-    socketio.emit("typing", {"from": sender, "typing": data.get("typing") is True}, to=target)
+    socketio.emit("typing", {"from": sender,
+                  "typing": data.get("typing") is True}, to=target)
+
 
 init_db()
 if __name__ == "__main__":

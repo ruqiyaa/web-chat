@@ -19,6 +19,7 @@ def get_db():
     finally:
         db.close()
 
+
 def init_db():
     with get_db() as db:
         db.execute("""
@@ -46,7 +47,8 @@ def init_db():
             UNIQUE (user_a, user_b)
             )
         """)
-        db.execute("CREATE INDEX IF NOT EXISTS idx_friend_b ON friendships (user_b)")
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_friend_b ON friendships (user_b)")
 
         db.execute("""
             CREATE TABLE IF NOT EXISTS messages (
@@ -59,8 +61,10 @@ def init_db():
             CHECK (sender_id != recipient_id)
             )
         """)
-        db.execute("CREATE INDEX IF NOT EXISTS idx_msg_pair ON messages (sender_id, recipient_id, id)")
-        db.execute("CREATE INDEX IF NOT EXISTS idx_msg_unread ON messages (recipient_id, read_at)")
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_msg_pair ON messages (sender_id, recipient_id, id)")
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_msg_unread ON messages (recipient_id, read_at)")
 
         db.execute("""
             CREATE TABLE IF NOT EXISTS chat_groups (
@@ -80,8 +84,15 @@ def init_db():
                 PRIMARY KEY (group_id, user_id)
             )
         """
-        )
-        db.execute("CREATE INDEX IF NOT EXISTS idx_members_user ON group_members (user_id)")
+                   )
+        # migration
+        cols = [r["name"] for r in db.execute(
+            "PRAGMA table_info(group_members)").fetchall()]
+        if "first_visible_id" not in cols:
+            db.execute(
+                "ALTER TABLE group_members ADD COLUMN first_visible_id INTEGER NOT NULL DEFAULT 0")
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_members_user ON group_members (user_id)")
         db.execute("""
             CREATE TABLE IF NOT EXISTS group_messages (
                 id          INTEGER PRIMARY KEY,
@@ -91,4 +102,5 @@ def init_db():
                 created_at  INTEGER NOT NULL
             )
         """)
-        db.execute("CREATE INDEX IF NOT EXISTS idx_gmsg_group ON group_messages (group_id, id)")
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_gmsg_group ON group_messages (group_id, id)")
